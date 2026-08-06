@@ -787,10 +787,11 @@ function renderUpgrades() {
 
 function renderContract() {
   if (state.rankedChallenge) {
-    dom.contractName.textContent = 'RANKED: ПОБЕДА СО СБОРКОЙ';
-    dom.contractDescription.textContent = state.rankedChallenge.orderRequired
-      ? 'Купите шесть предметов строго слева направо, а также Aghanim’s Scepter и Shard.'
-      : 'Соберите все шесть предметов, Aghanim’s Scepter и Shard в любом порядке.';
+    const modifier = state.rankedChallenge.modifier;
+    dom.contractName.textContent = modifier?.name || 'RANKED: ПОБЕДА СО СБОРКОЙ';
+    const order = state.rankedChallenge.orderRequired ? ' Предметы покупаются строго слева направо.' : '';
+    const bonus = modifier ? ` Бонус модификатора: +${Math.round((modifier.multiplier - 1) * 100)}%.` : '';
+    dom.contractDescription.textContent = `${modifier?.description || 'Соберите выданные предметы и победите.'}${order}${bonus}`;
     return;
   }
   const contract = CONTRACTS[state.contractIndex] || CONTRACTS[0];
@@ -803,7 +804,7 @@ function renderContractsCatalog() {
   dom.contractsList.innerHTML = CONTRACTS.map((contract, index) => `
     <article class="contract-catalog-item ${index === state.contractIndex ? 'is-current' : ''}">
       <span>${String(index + 1).padStart(2, '0')}</span>
-      <div><strong>${escapeHtml(contract.name)}</strong><p>${escapeHtml(contract.description)}</p></div>
+      <div><strong>${escapeHtml(contract.name)}</strong><p>${escapeHtml(contract.description)} · Ranked +${Math.round((contract.multiplier - 1) * 100)}%</p></div>
     </article>`).join('');
 }
 

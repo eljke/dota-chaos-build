@@ -44,3 +44,10 @@ test('unparsed match asks for replay parsing', () => {
   delete unparsed.players[0].purchase_log;
   assert.equal(verifyMatch({ match: unparsed, attempt, accountId: 42 }).parsed, false);
 });
+
+test('match verification rejects a failed assigned modifier', () => {
+  const challenged = { ...attempt, modifier_id: 'tower-pressure' };
+  const result = verifyMatch({ match, attempt: challenged, accountId: 42 });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(error => error.includes('Осадный контракт')));
+});

@@ -1,5 +1,6 @@
-import { generateBuild } from '../../js/generator.js';
+import { generateBuild, seededRandom } from '../../js/generator.js';
 import { BOOT_KEYS, isItemCompatible } from '../../js/item-rules.js';
+import { eligibleModifiers, modifierById } from '../../js/modifiers.js';
 import { calculateScore, verifyMatch } from './verify.js';
 
 type JsonObject = Record<string, unknown>;
@@ -19,7 +20,7 @@ const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
 const STEAM_ID_BASE = 76561197960265728n;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ATTEMPT_SECONDS = 24 * 60 * 60;
-const RULES_VERSION = '1.4.0';
+const RULES_VERSION = '1.5.0';
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string, readonly code = 'request_failed') {
@@ -135,11 +136,14 @@ function createRoll(pool: RankedPool, mode: 'normal' | 'turbo', orderRequired: b
     rapierChance: 0.0035
   });
   if (!build.hero || build.items.length !== 6) throw new HttpError(503, 'Недостаточно данных для ranked-сборки.', 'pool_incomplete');
-  return { seed, mode, orderRequired, hero: build.hero, items: build.items };
+  const modifiers = eligibleModifiers({ hero: build.hero, items: build.items });
+  const modifier = modifiers[Math.floor(seededRandom(`modifier:${seed}`)() * modifiers.length)];
+  return { seed, mode, orderRequired, hero: build.hero, items: build.items, modifier };
 }
 
 function challenge(row: AttemptRow) {
   const items: RankedItem[] = JSON.parse(row.items_json);
+  const modifier = modifierById(row.modifier_id);
   return {
     id: row.id,
     status: row.status,
@@ -147,9 +151,10 @@ function challenge(row: AttemptRow) {
     orderRequired: row.order_required === 1,
     rerolls: row.roll_count,
     rollsSeen: row.roll_count + 1,
-    scorePreview: calculateScore({ rerolls: row.roll_count, orderRequired: row.order_required === 1 }),
+    scorePreview: calculateScore({ rerolls: row.roll_count, orderRequired: row.order_required === 1, modifierMultiplier: modifier?.multiplier }),
     hero: { id: row.hero_id, key: row.hero_key, name: row.hero_name },
     items,
+    modifier,
     rulesVersion: row.rules_version,
     dataVersion: row.data_version,
     committedAt: row.committed_at
@@ -254,9 +259,9 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
   await env.DB.prepare(`INSERT INTO attempts
     (id, steam_id, mode, order_required, status, roll_count, seed, hero_id, hero_key, hero_name, items_json,
      modifier_id, rules_version, data_version, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'rolling', 0, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`)
+    VALUES (?, ?, ?, ?, 'rolling', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(id, user.steam_id, mode, orderRequired ? 1 : 0, roll.seed, roll.hero.id, roll.hero.key, roll.hero.name,
-      JSON.stringify(roll.items), RULES_VERSION, pool.generatedAt, now, now).run();
+      JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt, now, now).run();
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 201, env);
 }
 
@@ -267,8 +272,8 @@ async function handleReroll(id: string, request: Request, env: Env, ctx: Executi
   const pool = await getPool(env, ctx);
   const roll = createRoll(pool, current.mode, current.order_required === 1);
   const result = await env.DB.prepare(`UPDATE attempts SET roll_count = roll_count + 1, seed = ?, hero_id = ?, hero_key = ?,
-    hero_name = ?, items_json = ?, data_version = ?, updated_at = ? WHERE id = ? AND status = 'rolling' AND roll_count = ?`)
-    .bind(roll.seed, roll.hero.id, roll.hero.key, roll.hero.name, JSON.stringify(roll.items), pool.generatedAt,
+    hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, updated_at = ? WHERE id = ? AND status = 'rolling' AND roll_count = ?`)
+    .bind(roll.seed, roll.hero.id, roll.hero.key, roll.hero.name, JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt,
       nowSeconds(), id, current.roll_count).run();
   if (result.meta.changes !== 1) throw new HttpError(409, 'Сборка уже была изменена в другой вкладке.', 'reroll_conflict');
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 200, env);
@@ -306,7 +311,8 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
   }
   if (!proof.ok) return json({ status: 'rejected', errors: proof.errors }, 422, env);
 
-  const score = calculateScore({ rerolls: attempt.roll_count, orderRequired: attempt.order_required === 1 });
+  const modifier = modifierById(attempt.modifier_id);
+  const score = calculateScore({ rerolls: attempt.roll_count, orderRequired: attempt.order_required === 1, modifierMultiplier: modifier?.multiplier });
   const now = nowSeconds();
   try {
     await env.DB.batch([
