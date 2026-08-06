@@ -1,15 +1,23 @@
 'use strict';
 
 const CONFIG = {
-  patch: '7.41e',
+  patchFallback: '7.41e',
   rapierChance: 0.0035,
   steamCdn: 'https://cdn.cloudflare.steamstatic.com',
+  metaSources: ['./data/meta.json'],
   sources: [
     {
+      name: 'локальный снимок',
+      heroes: './data/heroes.json',
+      items: './data/items.json'
+    },
+    {
+      name: 'jsDelivr',
       heroes: 'https://cdn.jsdelivr.net/gh/odota/dotaconstants@master/build/heroes.json',
       items: 'https://cdn.jsdelivr.net/gh/odota/dotaconstants@master/build/items.json'
     },
     {
+      name: 'GitHub Raw',
       heroes: 'https://raw.githubusercontent.com/odota/dotaconstants/master/build/heroes.json',
       items: 'https://raw.githubusercontent.com/odota/dotaconstants/master/build/items.json'
     }
@@ -67,54 +75,46 @@ const QUALITY_RU = {
 };
 
 const CONTRACTS = [
-  {
-    name: 'Жадный Аганим',
-    description: 'Aghanim\'s Scepter должен стать одним из первых трёх полностью собранных крупных предметов.'
-  },
-  {
-    name: 'Осколок судьбы',
-    description: 'Купи Aghanim\'s Shard при первой безопасной возможности после 15:00 — до следующего предмета дороже 3000.'
-  },
-  {
-    name: 'Без возврата',
-    description: 'Нельзя продавать или разбирать полностью собранные предметы из выданной шестёрки.'
-  },
-  {
-    name: 'Лестница нетворса',
-    description: 'Завершай основные предметы по возрастанию цены: от самого дешёвого к самому дорогому.'
-  },
-  {
-    name: 'Последняя роскошь',
-    description: 'Самый дорогой предмет сборки разрешено завершить только шестым.'
-  },
-  {
-    name: 'Чистый Quick Buy',
-    description: 'В Quick Buy может находиться только текущий предмет и его компоненты — без заготовок на следующий.'
-  },
-  {
-    name: 'Рошан решает',
-    description: 'После первого убийства Рошана вашей командой следующая крупная покупка — Аганим или шард.'
-  },
-  {
-    name: 'Компонент долга',
-    description: 'После каждой второй смерти первым делом купи компонент самого дешёвого незавершённого предмета.'
-  },
-  {
-    name: 'Шард до роскоши',
-    description: 'Aghanim\'s Shard должен быть куплен раньше любого предмета стоимостью 5000 золота и выше.'
-  },
-  {
-    name: 'Неподвижный слот',
-    description: 'Первый завершённый предмет занимает выбранный слот инвентаря до конца матча и не перемещается.'
-  },
-  {
-    name: 'Один путь',
-    description: 'После покупки первого компонента предмета нельзя переключаться на сборку другого крупного предмета.'
-  },
-  {
-    name: 'Налог на камбэк',
-    description: 'После выигранной драки с тремя и более убийствами потрать доступное золото только на выданную сборку.'
-  }
+  { name: 'Жадный Аганим', description: "Aghanim's Scepter должен стать одним из первых трёх полностью собранных крупных предметов." },
+  { name: 'Осколок судьбы', description: "Купи Aghanim's Shard при первой безопасной возможности после 15:00 — до следующего предмета дороже 3000." },
+  { name: 'Без возврата', description: 'Нельзя продавать или разбирать полностью собранные предметы из выданной шестёрки.' },
+  { name: 'Лестница нетворса', description: 'Завершай основные предметы по возрастанию цены: от самого дешёвого к самому дорогому.' },
+  { name: 'Последняя роскошь', description: 'Самый дорогой предмет сборки разрешено завершить только шестым.' },
+  { name: 'Чистый Quick Buy', description: 'В Quick Buy может находиться только текущий предмет и его компоненты — без заготовок на следующий.' },
+  { name: 'Рошан решает', description: 'После первого убийства Рошана вашей командой следующая крупная покупка — Аганим или шард.' },
+  { name: 'Компонент долга', description: 'После каждой второй смерти первым делом купи компонент самого дешёвого незавершённого предмета.' },
+  { name: 'Шард до роскоши', description: "Aghanim's Shard должен быть куплен раньше любого предмета стоимостью 5000 золота и выше." },
+  { name: 'Неподвижный слот', description: 'Первый завершённый предмет занимает выбранный слот инвентаря до конца матча и не перемещается.' },
+  { name: 'Один путь', description: 'После покупки первого компонента предмета нельзя переключаться на сборку другого крупного предмета.' },
+  { name: 'Налог на камбэк', description: 'После выигранной драки с тремя и более убийствами потрать доступное золото только на выданную сборку.' },
+  { name: 'Левый карман', description: 'Предметы нужно собирать строго слева направо по слотам. Перепрыгивать через незавершённый слот нельзя.' },
+  { name: 'Сапоговый суверенитет', description: 'Сапог из первого слота нельзя улучшать, продавать или перекладывать до 25:00.' },
+  { name: 'Курьер за реку не ходит', description: 'До 20:00 курьер не может пересекать реку. Забирай доставку на своей половине карты.' },
+  { name: 'Бедный, но быстрый', description: 'После каждого возвращения на базу сначала потрать золото на самый дешёвый доступный компонент.' },
+  { name: 'Руна бухгалтерии', description: 'После каждой взятой руны богатства следующая покупка должна быть компонентом выданной сборки.' },
+  { name: 'Без мелочи', description: 'После 15:00 нельзя покидать базу, имея больше 1200 ненужного золота при доступном компоненте.' },
+  { name: 'Три смерти — один дым', description: 'После каждой третьей смерти купи Smoke of Deceit и используй его с союзником до следующей драки.' },
+  { name: 'Телепортная дисциплина', description: 'После 10:00 в инвентаре всегда должен быть хотя бы один Town Portal Scroll.' },
+  { name: 'Мидас не ждёт', description: 'Если выпал Hand of Midas, его активную способность нельзя держать готовой дольше 20 секунд.' },
+  { name: 'Жадный курьер', description: 'Курьер может доставлять только компоненты текущего предмета; заготовки на следующий запрещены.' },
+  { name: 'Сломанный магазин', description: 'Каждый крупный предмет собирай по компонентам слева направо, как они показаны в дереве сборки.' },
+  { name: 'Аванс за убийство', description: 'После убийства вражеского героя до следующей драки купи хотя бы один компонент сборки.' },
+  { name: 'Пособие по выживанию', description: 'После двух смертей подряд следующая покупка должна давать здоровье, броню или сопротивление магии, если такой компонент есть.' },
+  { name: 'Кнопка за 1400', description: 'Шард нужно купить ровно первой крупной покупкой после 15:00, независимо от текущего предмета.' },
+  { name: 'Аганим в кредит', description: 'После покупки первого компонента Аганима нельзя покупать компоненты других крупных предметов до его завершения.' },
+  { name: 'Рошанова десятина', description: 'После каждого убийства Рошана зарезервируй следующие 1000 золота только под Аганим, шард или текущий предмет.' },
+  { name: 'Никаких распродаж', description: 'Нельзя продавать стартовые предметы, пока не завершены минимум два предмета из выданной сборки.' },
+  { name: 'Шесть витрин', description: 'Каждый готовый предмет должен занимать свой исходный слот; менять порядок готовых предметов нельзя.' },
+  { name: 'Дорогой финал', description: 'Предмет стоимостью выше 5000 нельзя завершать до 30:00.' },
+  { name: 'Дешёвый финал', description: 'Самый дешёвый предмет сборки обязан быть завершён последним.' },
+  { name: 'Один активный', description: 'До завершения третьего предмета одновременно можно носить не больше одного активного предмета из сборки.' },
+  { name: 'Пыльная работа', description: 'После появления невидимого героя во вражеской команде всегда носи Dust до конца матча.' },
+  { name: 'Слот памяти', description: 'Предмет, с которым сделан первый килл, нельзя перемещать из его слота до конца матча.' },
+  { name: 'Пять минут хаоса', description: 'На каждой отметке 5:00, 10:00, 15:00 и далее купи компонент текущего предмета, если хватает золота.' },
+  { name: 'Ноль предзаказов', description: 'Запрещено покупать компоненты следующего предмета, пока текущий не собран полностью.' },
+  { name: 'Двойная ставка', description: 'После двойного убийства начни собирать самый дорогой ещё не завершённый предмет.' },
+  { name: 'Смертельная экономия', description: 'После смерти нельзя покупать ничего до возрождения; затем первая покупка — компонент сборки.' },
+  { name: 'Ночной магазин', description: 'После 30:00 крупные покупки разрешены только во время ночного цикла.' }
 ];
 
 const FALLBACK_HEROES = [
@@ -228,9 +228,17 @@ const dom = {
   contractName: document.querySelector('#contractName'),
   contractDescription: document.querySelector('#contractDescription'),
   rerollContractButton: document.querySelector('#rerollContractButton'),
-  seedCode: document.querySelector('#seedCode'),
-  copySeedButton: document.querySelector('#copySeedButton'),
+  showContractsButton: document.querySelector('#showContractsButton'),
+  contractsDialog: document.querySelector('#contractsDialog'),
+  contractsList: document.querySelector('#contractsList'),
+  closeContractsButton: document.querySelector('#closeContractsButton'),
+  lobbyCodeOutput: document.querySelector('#lobbyCodeOutput'),
+  copyLobbyCodeButton: document.querySelector('#copyLobbyCodeButton'),
+  lobbyCodeInput: document.querySelector('#lobbyCodeInput'),
+  importLobbyCodeButton: document.querySelector('#importLobbyCodeButton'),
   shareButton: document.querySelector('#shareButton'),
+  statsLink: document.querySelector('#statsLink'),
+  visitCount: document.querySelector('#visitCount'),
   toast: document.querySelector('#toast')
 };
 
@@ -248,13 +256,15 @@ const state = {
   inspectorPath: [],
   forceBootSlot: true,
   seed: '',
+  meta: null,
+  dataSourceName: '',
   usingFallback: false,
   ready: false
 };
 
 let toastTimer = null;
 
-dom.patchLabel.textContent = CONFIG.patch;
+dom.patchLabel.textContent = CONFIG.patchFallback;
 
 function assetUrl(path) {
   if (!path) return '';
@@ -275,17 +285,41 @@ function normalizeHeroes(raw) {
     .sort((a, b) => a.localized_name.localeCompare(b.localized_name));
 }
 
+function prettifyItemKey(key) {
+  return String(key || '')
+    .replace(/^recipe_/, '')
+    .split('_')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 function normalizeItems(raw) {
   const output = {};
+
   for (const [key, item] of Object.entries(raw || {})) {
-    if (!item || !item.dname || !item.img) continue;
-    output[key] = { ...item, key, sourceKey: key };
+    if (!item || !item.img) continue;
+    const isRecipe = key.startsWith('recipe_');
+    const dname = item.dname || (isRecipe ? `${prettifyItemKey(key)} Recipe` : '');
+    if (!dname) continue;
+    output[key] = { ...item, dname, key, sourceKey: key };
   }
 
   for (const [publicKey, sourceKey] of Object.entries(ITEM_KEY_ALIASES)) {
     const source = output[sourceKey];
-    if (!source) continue;
-    output[publicKey] = { ...source, key: publicKey, sourceKey };
+    if (source) output[publicKey] = { ...source, key: publicKey, sourceKey };
+
+    const sourceRecipeKey = `recipe_${sourceKey}`;
+    const publicRecipeKey = `recipe_${publicKey}`;
+    const sourceRecipe = output[sourceRecipeKey];
+    if (sourceRecipe) {
+      output[publicRecipeKey] = {
+        ...sourceRecipe,
+        key: publicRecipeKey,
+        sourceKey: sourceRecipeKey,
+        dname: `${source?.dname || prettifyItemKey(publicKey)} Recipe`
+      };
+    }
   }
 
   return output;
@@ -330,12 +364,33 @@ async function loadRemoteData() {
         fetchJson(source.heroes),
         fetchJson(source.items)
       ]);
-      return { heroes, items };
+      return { heroes, items, sourceName: source.name };
     } catch (error) {
       lastError = error;
     }
   }
   throw lastError || new Error('Не удалось загрузить данные');
+}
+
+async function loadMeta() {
+  for (const url of CONFIG.metaSources) {
+    try {
+      return await fetchJson(url, 5000);
+    } catch (error) {
+      console.info('Patch metadata is unavailable:', error);
+    }
+  }
+  return null;
+}
+
+function applyMeta(meta) {
+  state.meta = meta;
+  const patch = String(meta?.patch || CONFIG.patchFallback);
+  dom.patchLabel.textContent = patch;
+  const source = meta?.patchSource ? `Источник патча: ${meta.patchSource}. ` : '';
+  const released = meta?.patchTimestamp ? `Патч опубликован ${new Date(Number(meta.patchTimestamp) * 1000).toLocaleDateString('ru-RU')}. ` : '';
+  const synced = meta?.syncedAt ? `Константы синхронизированы ${new Date(meta.syncedAt).toLocaleString('ru-RU')}.` : '';
+  dom.patchLabel.parentElement.title = `${source}${released}${synced}`.trim() || 'Версия патча из резервной настройки сайта';
 }
 
 function setDataState(mode, text) {
@@ -689,12 +744,23 @@ function itemDescription(item) {
 }
 
 function recipeComponents(item) {
-  const keys = Array.isArray(item?.components) ? [...item.components] : [];
   const sourceKey = item?.sourceKey || item?.key || '';
-  const recipeKey = sourceKey ? `recipe_${sourceKey}` : '';
-  const recipe = recipeKey ? state.itemsByKey[recipeKey] : null;
-  if (recipe && Number(recipe.cost) > 0 && !keys.includes(recipeKey)) keys.push(recipeKey);
-  return keys.map(key => state.itemsByKey[key]).filter(Boolean);
+  const selfKeys = new Set([item?.key, sourceKey].filter(Boolean));
+  const keys = Array.isArray(item?.components)
+    ? item.components
+      .map(key => String(key || '').trim())
+      .filter(key => key && !selfKeys.has(key))
+    : [];
+
+  const publicRecipeKey = item?.key ? `recipe_${item.key}` : '';
+  const sourceRecipeKey = sourceKey ? `recipe_${sourceKey}` : '';
+  const recipe = state.itemsByKey[publicRecipeKey] || state.itemsByKey[sourceRecipeKey];
+  if (recipe && Number(recipe.cost) > 0 && !keys.includes(recipe.key)) keys.push(recipe.key);
+
+  const seen = new Set();
+  return keys
+    .map(key => state.itemsByKey[key])
+    .filter(component => component && !selfKeys.has(component.key) && !seen.has(component.key) && seen.add(component.key));
 }
 
 function inspectorItem() {
@@ -824,8 +890,38 @@ function renderContract() {
   dom.contractDescription.textContent = contract.description;
 }
 
+function renderContractsCatalog() {
+  dom.showContractsButton.textContent = `Все модификаторы (${CONTRACTS.length})`;
+  dom.contractsList.innerHTML = CONTRACTS.map((contract, index) => `
+    <article class="contract-catalog-item ${index === state.contractIndex ? 'is-current' : ''}">
+      <span>${String(index + 1).padStart(2, '0')}</span>
+      <div><strong>${escapeHtml(contract.name)}</strong><p>${escapeHtml(contract.description)}</p></div>
+    </article>`).join('');
+}
+
+function encodeLobbyCode(paramsText) {
+  const binary = btoa(unescape(encodeURIComponent(paramsText)));
+  return `DCB1-${binary.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+}
+
+function decodeLobbyCode(code) {
+  const normalized = String(code || '').trim().replace(/\s+/g, '');
+  if (!normalized.toUpperCase().startsWith('DCB1-')) return null;
+  const payload = normalized.slice(5).replace(/-/g, '+').replace(/_/g, '/');
+  const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
+  try {
+    return decodeURIComponent(escape(atob(padded)));
+  } catch {
+    return null;
+  }
+}
+
+function currentLobbyCode() {
+  return state.hero && state.items.length === 6 ? encodeLobbyCode(serializeBuild()) : '';
+}
+
 function renderSeed() {
-  dom.seedCode.textContent = state.seed || '--------';
+  dom.lobbyCodeOutput.value = currentLobbyCode();
 }
 
 function renderAll() {
@@ -836,6 +932,7 @@ function renderAll() {
   renderOptions();
   renderUpgrades();
   renderContract();
+  renderContractsCatalog();
   renderSeed();
 }
 
@@ -847,6 +944,7 @@ function rerollContract() {
   state.contractIndex = next;
   state.seed = randomSeed();
   renderContract();
+  renderContractsCatalog();
   renderSeed();
   updateUrl();
 }
@@ -875,8 +973,7 @@ function updateUrl() {
   history.replaceState(null, '', url);
 }
 
-function readSharedBuild() {
-  const raw = window.location.hash.replace(/^#/, '');
+function parseBuildParams(raw) {
   if (!raw) return null;
   const params = new URLSearchParams(raw);
   const hero = state.heroByKey.get(params.get('h'));
@@ -908,17 +1005,52 @@ function readSharedBuild() {
   };
 }
 
+function readSharedBuild() {
+  return parseBuildParams(window.location.hash.replace(/^#/, ''));
+}
+
+function applySharedBuild(shared) {
+  state.seed = shared.seed;
+  state.hero = shared.hero;
+  state.items = shared.items;
+  state.contractIndex = shared.contractIndex;
+  state.locked = shared.locks;
+  state.forceBootSlot = shared.forceBootSlot;
+  clearInspector();
+  renderAll();
+  updateUrl();
+}
+
+function importLobbyCode() {
+  const raw = dom.lobbyCodeInput.value.trim();
+  if (!raw) {
+    showToast('Вставь код сборки в поле импорта.');
+    return;
+  }
+
+  if (/^[A-Z0-9]{6,24}$/i.test(raw) && !raw.toUpperCase().startsWith('DCB1')) {
+    generateFull(raw.toUpperCase(), { animate: true });
+    dom.lobbyCodeInput.value = '';
+    showToast('Seed применён. Точный результат зависит от версии констант.');
+    return;
+  }
+
+  const decoded = decodeLobbyCode(raw);
+  const shared = decoded ? parseBuildParams(decoded) : null;
+  if (!shared) {
+    showToast('Код не распознан или содержит несовместимую сборку.');
+    return;
+  }
+
+  applySharedBuild(shared);
+  dom.lobbyCodeInput.value = '';
+  showToast('Точная сборка импортирована.');
+}
+
 function restoreOrGenerate() {
   const shared = readSharedBuild();
   if (shared) {
-    state.seed = shared.seed;
-    state.hero = shared.hero;
-    state.items = shared.items;
-    state.contractIndex = shared.contractIndex;
-    state.locked = shared.locks;
-    state.forceBootSlot = shared.forceBootSlot;
-    clearInspector();
-    renderAll();
+    applySharedBuild(shared);
   } else {
     const querySeed = new URLSearchParams(window.location.search).get('seed');
     generateFull(querySeed?.slice(0, 24).toUpperCase() || randomSeed(), { animate: false });
@@ -948,28 +1080,71 @@ function showToast(message) {
   toastTimer = setTimeout(() => dom.toast.classList.remove('is-visible'), 2400);
 }
 
+
+function initAnalytics() {
+  const code = String(globalThis.DCB_ANALYTICS?.goatCounterCode || '').trim().toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(code)) return;
+
+  const dashboardUrl = `https://${code}.goatcounter.com/`;
+  dom.statsLink.href = dashboardUrl;
+  dom.statsLink.hidden = false;
+
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://gc.zgo.at/count.js';
+  script.dataset.goatcounter = `https://${code}.goatcounter.com/count`;
+  script.addEventListener('load', async () => {
+    try {
+      const path = encodeURIComponent(window.location.pathname);
+      const response = await fetch(`https://${code}.goatcounter.com/counter/${path}.json`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload.count) dom.visitCount.textContent = `${payload.count} визитов`;
+    } catch {
+      // Public counter may be disabled; the private dashboard still works.
+    }
+  });
+  document.head.append(script);
+}
+
 function bindEvents() {
   dom.generateButton.addEventListener('click', () => generateFull());
   dom.rerollUnlockedButton.addEventListener('click', rerollUnlocked);
   dom.rerollHeroButton.addEventListener('click', rerollHero);
   dom.rerollContractButton.addEventListener('click', rerollContract);
+  dom.showContractsButton.addEventListener('click', () => {
+    renderContractsCatalog();
+    dom.contractsDialog.showModal();
+  });
+  dom.closeContractsButton.addEventListener('click', () => dom.contractsDialog.close());
+  dom.contractsDialog.addEventListener('click', event => {
+    if (event.target === dom.contractsDialog) dom.contractsDialog.close();
+  });
   dom.forceBootSlotToggle.addEventListener('change', event => setForceBootSlot(event.currentTarget.checked));
   dom.scepterSlotButton.addEventListener('click', () => inspectItem('ultimate_scepter'));
   dom.shardSlotButton.addEventListener('click', () => inspectItem('aghanims_shard'));
-  dom.copySeedButton.addEventListener('click', () => copyText(state.seed, 'Код челленджа скопирован.'));
+  dom.copyLobbyCodeButton.addEventListener('click', () => copyText(currentLobbyCode(), 'Код точной сборки скопирован.'));
+  dom.importLobbyCodeButton.addEventListener('click', importLobbyCode);
+  dom.lobbyCodeInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') importLobbyCode();
+  });
   dom.shareButton.addEventListener('click', () => copyText(window.location.href, 'Ссылка на точную сборку скопирована.'));
 }
 
 async function bootstrap() {
   bindEvents();
-  setDataState('', 'загрузка данных');
+  initAnalytics();
+  setDataState('', 'загрузка констант');
+
+  const metaPromise = loadMeta();
 
   try {
     const remote = await loadRemoteData();
     state.heroes = normalizeHeroes(remote.heroes);
     state.itemsByKey = normalizeItems(remote.items);
+    state.dataSourceName = remote.sourceName;
     state.usingFallback = false;
-    setDataState('ready', 'актуальные данные');
+    setDataState('ready', remote.sourceName === 'локальный снимок' ? 'константы синхронизированы' : `данные: ${remote.sourceName}`);
   } catch (error) {
     state.heroes = FALLBACK_HEROES;
     state.itemsByKey = normalizeItems(FALLBACK_ITEMS);
@@ -977,6 +1152,8 @@ async function bootstrap() {
     setDataState('fallback', 'резервные данные');
     console.warn('Remote Dota data unavailable, fallback enabled:', error);
   }
+
+  applyMeta(await metaPromise);
 
   if (!state.heroes.length) state.heroes = FALLBACK_HEROES;
   if (!Object.keys(state.itemsByKey).length) state.itemsByKey = normalizeItems(FALLBACK_ITEMS);

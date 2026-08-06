@@ -1,16 +1,16 @@
 {
-  "name": "Dota Chaos Build",
-  "short_name": "Chaos Build",
+  "name": "Dota 2 Random — Dota Chaos Build",
+  "short_name": "Dota Random",
+  "description": "Случайный герой, сборка предметов и модификатор матча для Dota 2",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#080b0e",
+  "background_color": "#0d1115",
   "theme_color": "#0d1115",
   "icons": [
     {
       "src": "assets/rune.svg",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
+      "type": "image/svg+xml"
     }
   ]
 }

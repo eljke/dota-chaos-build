@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://eljke.github.io/dota-chaos-build/sitemap.xml

@@ -4,11 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0d1115">
-  <meta name="description" content="Генератор случайного героя и сборки Dota 2 с ограничениями по типу атаки, Аганимом, шардом и общими seed-ссылками.">
-  <title>Dota Chaos Build — случайный герой и предметы</title>
+  <meta name="description" content="Dota 2 Random: генератор случайного героя, подходящей сборки предметов, Аганима, шарда и забавного модификатора матча. Актуальные константы и общие коды сборок.">
+  <meta name="keywords" content="dota, dota 2, dota random, dota 2 random, рандом дота, случайный герой dota 2, random hero dota, random build dota 2, генератор сборки дота, предметы dota 2">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://eljke.github.io/dota-chaos-build/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:site_name" content="Dota Chaos Build">
+  <meta property="og:title" content="Dota 2 Random — случайный герой и сборка">
+  <meta property="og:description" content="Случайный герой Dota 2, шесть предметов, Аганим, шард и модификатор матча. Делись точной сборкой по ссылке или коду.">
+  <meta property="og:url" content="https://eljke.github.io/dota-chaos-build/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Dota 2 Random — случайный герой и сборка">
+  <meta name="twitter:description" content="Генератор случайного героя, предметов и модификатора матча для Dota 2.">
+  <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.1">
+  <link rel="stylesheet" href="styles.css?v=1.2.0">
+  <script type="application/ld+json">{
+    "@context":"https://schema.org",
+    "@type":"WebApplication",
+    "name":"Dota Chaos Build",
+    "alternateName":"Dota 2 Random",
+    "url":"https://eljke.github.io/dota-chaos-build/",
+    "applicationCategory":"GameApplication",
+    "operatingSystem":"Any",
+    "inLanguage":"ru",
+    "description":"Генератор случайного героя, сборки предметов и модификатора матча для Dota 2."
+  }</script>
 </head>
 <body>
   <div class="ambient ambient--red" aria-hidden="true"></div>
@@ -29,6 +52,11 @@
     </div>
   </header>
 
+  <section class="intro-copy" aria-labelledby="pageTitle">
+    <h1 id="pageTitle">Dota 2 Random — случайный герой и сборка</h1>
+    <p>Генератор выбирает героя, шесть предметов, Аганим, шард и дополнительный модификатор матча. Ограничения melee/ranged сохраняют смысл, остальное остаётся хаотичным.</p>
+  </section>
+
   <main class="app-shell">
     <section class="hero-panel dota-panel" aria-labelledby="heroName">
       <div class="panel-cap panel-cap--red"><span>ГЕРОЙ</span></div>
@@ -42,7 +70,7 @@
       <div class="hero-info">
         <div>
           <p class="eyebrow" id="heroAttackType">—</p>
-          <h1 id="heroName">Загрузка героев…</h1>
+          <h2 id="heroName">Загрузка героев…</h2>
         </div>
         <button class="icon-button" id="rerollHeroButton" type="button" title="Сменить только героя" aria-label="Сменить только героя">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg>
@@ -99,7 +127,7 @@
         <button class="primary-button" id="generateButton" type="button">
           <span class="primary-button__flare"></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10v2h-1v3.17l3.41 3.41a2 2 0 0 1 0 2.83L16 16.83V20h1v2H7v-2h1v-3.17l-3.41-3.42a2 2 0 0 1 0-2.82L8 7.17V4H7V2Zm3 2v4l-4 4 4 4v4h4v-4l4-4-4-4V4h-4Z"/></svg>
-          ЗАПИЛИТЬ ЗАТАР
+          СГЕНЕРИРОВАТЬ СБОРКУ
         </button>
         <button class="secondary-button" id="rerollUnlockedButton" type="button">Перебросить свободные</button>
       </div>
@@ -116,19 +144,28 @@
         <p class="contract-kicker">МОДИФИКАТОР МАТЧА</p>
         <h2 id="contractName">—</h2>
         <p id="contractDescription">Дополнительное условие появится вместе со сборкой.</p>
-        <button class="text-button" id="rerollContractButton" type="button">Сменить контракт</button>
+        <div class="contract-actions">
+          <button class="text-button" id="rerollContractButton" type="button">Сменить модификатор</button>
+          <button class="text-button text-button--muted" id="showContractsButton" type="button">Все модификаторы</button>
+        </div>
       </section>
 
       <section class="seed-panel dota-panel" aria-labelledby="seedTitle">
-        <div class="panel-cap"><span id="seedTitle">ЛОББИ ХАОСА</span></div>
-        <p>Одинаковый код создаёт одинакового героя, предметы и контракт.</p>
-        <div class="seed-code-row">
-          <code id="seedCode">--------</code>
-          <button class="copy-button" id="copySeedButton" type="button" aria-label="Скопировать код">КОД</button>
+        <div class="panel-cap"><span id="seedTitle">КОД СБОРКИ</span></div>
+        <p>Код переносит точного героя, предметы, модификатор, сапоговый режим и закреплённые слоты.</p>
+        <label class="lobby-code-label" for="lobbyCodeOutput">Текущая сборка</label>
+        <div class="lobby-code-row">
+          <input id="lobbyCodeOutput" type="text" readonly aria-label="Код текущей сборки">
+          <button class="copy-button" id="copyLobbyCodeButton" type="button">Копировать</button>
+        </div>
+        <label class="lobby-code-label" for="lobbyCodeInput">Импортировать код</label>
+        <div class="lobby-code-row">
+          <input id="lobbyCodeInput" type="text" autocomplete="off" spellcheck="false" placeholder="DCB1-… или старый seed">
+          <button class="copy-button copy-button--import" id="importLobbyCodeButton" type="button">Импорт</button>
         </div>
         <button class="share-button" id="shareButton" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a3.2 3.2 0 0 0 0-1.39l7.05-4.11A3 3 0 1 0 15 5c0 .23.03.46.08.67L8.03 9.78A3 3 0 1 0 8 14.22l7.12 4.16A3 3 0 1 0 18 16.08Z"/></svg>
-          Скопировать ссылку
+          Скопировать ссылку на сборку
         </button>
       </section>
 
@@ -146,9 +183,24 @@
   </main>
 
   <footer class="footer">
-    <p>Неофициальный фан-проект. Dota 2 и игровые материалы принадлежат Valve Corporation.</p>
-    <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Проверить актуальный патч</a>
+    <div>
+      <p>Неофициальный фан-проект. Dota 2 и игровые материалы принадлежат Valve Corporation.</p>
+      <p class="footer__seo">Dota 2 Random — случайный герой, random build, предметы и модификаторы матча.</p>
+    </div>
+    <div class="footer__links">
+      <span id="visitCount" class="visit-count"></span>
+      <a id="statsLink" href="#" target="_blank" rel="noreferrer" hidden>Статистика посещений</a>
+      <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Официальные обновления</a>
+    </div>
   </footer>
+
+  <dialog class="contracts-dialog" id="contractsDialog" aria-labelledby="contractsDialogTitle">
+    <div class="contracts-dialog__head">
+      <div><span>КАТАЛОГ ХАОСА</span><h2 id="contractsDialogTitle">Все модификаторы матча</h2></div>
+      <button id="closeContractsButton" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="contracts-list" id="contractsList"></div>
+  </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -165,6 +217,7 @@
     </article>
   </template>
 
-  <script src="app.js?v=1.1.1" defer></script>
+  <script src="analytics-config.js?v=1.2.0"></script>
+  <script src="app.js?v=1.2.0" defer></script>
 </body>
 </html>

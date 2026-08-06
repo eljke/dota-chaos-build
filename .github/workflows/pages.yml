@@ -1,8 +1,10 @@
-name: Deploy static site to GitHub Pages
+name: Sync Dota data and deploy GitHub Pages
 
 on:
   push:
     branches: [master]
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sync current patch and dotaconstants
+        run: node scripts/sync-data.mjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
