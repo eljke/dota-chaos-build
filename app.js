@@ -3,6 +3,11 @@
 import { generateBuild, pick, seededRandom } from './js/generator.js';
 import { decodeBuildCode, encodeBuildCode } from './js/build-code.js';
 import { MODIFIERS as CONTRACTS } from './js/modifiers.js';
+import { initRanked } from './js/ranked-client.js';
+import {
+  BOOT_KEYS, BOOT_KEY_SET, ITEM_KEY_ALIASES, ITEM_POOL_KEYS,
+  MELEE_ONLY, RANGED_ONLY, isItemCompatible
+} from './js/item-rules.js';
 
 const CONFIG = {
   patchFallback: '7.41e',
@@ -28,39 +33,6 @@ const CONFIG = {
   ]
 };
 
-const ITEM_POOL_KEYS = [
-  'phase_boots', 'power_treads', 'arcane_boots', 'tranquil_boots', 'travel_boots', 'travel_boots_2',
-  'guardian_greaves', 'boots_of_bearing',
-  'blink', 'overwhelming_blink', 'swift_blink', 'arcane_blink',
-  'black_king_bar', 'sphere', 'lotus_orb', 'aeon_disk', 'blade_mail', 'heart', 'shivas_guard',
-  'assault', 'bloodstone', 'pipe', 'crimson_guard', 'vanguard', 'consecrated_wraps',
-  'satanic', 'skadi', 'butterfly', 'monkey_king_bar', 'greater_crit', 'desolator', 'silver_edge',
-  'invis_sword', 'radiance', 'mjollnir', 'maelstrom', 'moon_shard', 'nullifier',
-  'diffusal_blade', 'disperser', 'manta', 'sange_and_yasha', 'yasha_and_kaya', 'kaya_and_sange',
-  'heavens_halberd', 'armlet', 'mask_of_madness', 'falcon_blade', 'mage_slayer',
-  'orchid', 'bloodthorn', 'witch_blade', 'parasma', 'angels_demise', 'phylactery', 'ethereal_blade',
-  'dagon_5', 'octarine_core', 'refresher', 'sheepstick', 'wind_waker', 'cyclone', 'rod_of_atos',
-  'gleipnir', 'revenants_brooch', 'veil_of_discord',
-  'force_staff', 'glimmer_cape', 'solar_crest', 'pavise', 'holy_locket', 'mekansm',
-  'spirit_vessel', 'essence_distiller', 'crellas_crozier',
-  'hand_of_midas', 'helm_of_the_dominator', 'helm_of_the_overlord',
-  'battlefury', 'basher', 'abyssal_blade', 'echo_sabre', 'harpoon',
-  'dragon_lance', 'hurricane_pike', 'specialists_array', 'hydras_breath'
-];
-
-const BOOT_KEYS = [
-  'phase_boots', 'power_treads', 'arcane_boots', 'tranquil_boots',
-  'travel_boots', 'travel_boots_2', 'guardian_greaves', 'boots_of_bearing'
-];
-const BOOT_KEY_SET = new Set(BOOT_KEYS);
-const ITEM_KEY_ALIASES = Object.freeze({
-  battlefury: 'bfury',
-  parasma: 'devastator',
-  gleipnir: 'gungir'
-});
-
-const RANGED_ONLY = new Set(['dragon_lance', 'hurricane_pike', 'specialists_array', 'hydras_breath']);
-const MELEE_ONLY = new Set(['battlefury', 'basher', 'abyssal_blade', 'echo_sabre', 'harpoon']);
 const EXCLUDED_GENERIC = new Set([
   'rapier', 'ultimate_scepter', 'ultimate_scepter_2', 'aghanims_shard', 'moon_shard',
   'gem', 'courier', 'flying_courier', 'tpscroll', 'dust', 'smoke_of_deceit',
@@ -221,6 +193,7 @@ const state = {
   meta: null,
   dataSourceName: '',
   usingFallback: false,
+  rankedChallenge: null,
   ready: false
 };
 
@@ -395,10 +368,7 @@ function randomSeed() {
 }
 
 function isCompatible(item, hero) {
-  if (!item || !hero) return false;
-  if (hero.attack_type === 'Ranged' && MELEE_ONLY.has(item.key)) return false;
-  if (hero.attack_type === 'Melee' && RANGED_ONLY.has(item.key)) return false;
-  return true;
+  return isItemCompatible(item, hero);
 }
 
 function compatiblePool(hero, excludedKeys = new Set(), options = {}) {
@@ -545,6 +515,7 @@ function rerollUnlocked() {
 }
 
 function toggleLock(index) {
+  if (state.rankedChallenge) return;
   if (state.locked.has(index)) state.locked.delete(index);
   else state.locked.add(index);
   renderInventory();
@@ -624,6 +595,7 @@ function renderInventory() {
     const cost = node.querySelector('.item-cost');
     const lock = node.querySelector('.lock-button');
     const restriction = node.querySelector('.restriction-badge');
+    lock.disabled = Boolean(state.rankedChallenge);
 
     img.src = assetUrl(item.img);
     img.alt = item.dname;
@@ -814,6 +786,13 @@ function renderUpgrades() {
 }
 
 function renderContract() {
+  if (state.rankedChallenge) {
+    dom.contractName.textContent = 'RANKED: ПОБЕДА СО СБОРКОЙ';
+    dom.contractDescription.textContent = state.rankedChallenge.orderRequired
+      ? 'Купите шесть предметов строго слева направо, а также Aghanim’s Scepter и Shard.'
+      : 'Соберите все шесть предметов, Aghanim’s Scepter и Shard в любом порядке.';
+    return;
+  }
   const contract = CONTRACTS[state.contractIndex] || CONTRACTS[0];
   dom.contractName.textContent = contract.name;
   dom.contractDescription.textContent = contract.description;
@@ -846,9 +825,41 @@ function renderAll() {
   renderContract();
   renderContractsCatalog();
   renderSeed();
+  renderRankedLock();
+}
+
+function renderRankedLock() {
+  const locked = Boolean(state.rankedChallenge);
+  [dom.generateButton, dom.rerollUnlockedButton, dom.rerollHeroButton, dom.rerollContractButton,
+    dom.forceBootSlotToggle, dom.lobbyCodeInput, dom.importLobbyCodeButton].forEach(control => {
+    control.disabled = locked;
+  });
+}
+
+function applyRankedChallenge(attempt) {
+  state.rankedChallenge = attempt;
+  if (attempt) {
+    const hero = state.heroByKey.get(attempt.hero.key);
+    const items = attempt.items.map(item => state.itemsByKey[item.key] || state.itemsByKey[item.sourceKey]);
+    if (!hero || items.some(item => !item)) {
+      state.rankedChallenge = null;
+      showToast('Ranked-сборка не совпала с текущими игровыми данными. Обновите страницу.');
+      renderAll();
+      return;
+    }
+    state.hero = hero;
+    state.items = items;
+    state.locked.clear();
+    state.forceBootSlot = true;
+    state.seed = attempt.seed || attempt.id;
+    clearInspector();
+    updateUrl();
+  }
+  renderAll();
 }
 
 function rerollContract() {
+  if (state.rankedChallenge) return;
   let next = state.contractIndex;
   while (next === state.contractIndex && CONTRACTS.length > 1) {
     next = Math.floor(Math.random() * CONTRACTS.length);
@@ -1121,6 +1132,7 @@ async function bootstrap() {
   state.itemPool = buildItemPool(state.itemsByKey);
   state.ready = true;
   restoreOrGenerate();
+  await initRanked({ onChallenge: applyRankedChallenge, onMessage: showToast });
 }
 
 bootstrap();

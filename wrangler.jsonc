@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dota-chaos-ranked-api",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-08-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": {
+    "SITE_ORIGIN": "https://eljke.github.io",
+    "SITE_URL": "https://eljke.github.io/dota-chaos-build/",
+    "OPENDOTA_API": "https://api.opendota.com/api"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dota-chaos-ranked",
+      "database_id": "f221c73e-4274-4076-ba30-fd37e8485d76",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}
