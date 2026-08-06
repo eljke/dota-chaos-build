@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1115">
+  <meta name="description" content="Генератор случайного героя и сборки Dota 2 с ограничениями по типу атаки, Аганимом, шардом и общими seed-ссылками.">
+  <title>Dota Chaos Build — случайный герой и предметы</title>
+  <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=1.1">
+</head>
+<body>
+  <div class="ambient ambient--red" aria-hidden="true"></div>
+  <div class="ambient ambient--blue" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Dota Chaos Build">
+      <img src="assets/rune.svg" alt="" width="38" height="38">
+      <span class="brand__text">
+        <strong>DOTA CHAOS BUILD</strong>
+        <small>рандомный герой · случайный затар</small>
+      </span>
+    </a>
+
+    <div class="topbar__meta">
+      <span class="patch-badge" title="Текущий игровой патч">PATCH <b id="patchLabel">7.41e</b></span>
+      <span class="data-state" id="dataState"><i></i> загрузка данных</span>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="hero-panel dota-panel" aria-labelledby="heroName">
+      <div class="panel-cap panel-cap--red"><span>ГЕРОЙ</span></div>
+      <div class="hero-portrait-wrap">
+        <div class="hero-backdrop" id="heroBackdrop"></div>
+        <img class="hero-portrait" id="heroPortrait" alt="Портрет героя" width="520" height="300">
+        <div class="hero-vignette"></div>
+        <div class="hero-attribute" id="heroAttribute" aria-label="Основной атрибут"></div>
+      </div>
+
+      <div class="hero-info">
+        <div>
+          <p class="eyebrow" id="heroAttackType">—</p>
+          <h1 id="heroName">Загрузка героев…</h1>
+        </div>
+        <button class="icon-button" id="rerollHeroButton" type="button" title="Сменить только героя" aria-label="Сменить только героя">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg>
+        </button>
+      </div>
+      <div class="role-list" id="heroRoles" aria-label="Роли героя"></div>
+
+      <div class="hero-stats">
+        <div><span>ДАЛЬНОСТЬ</span><strong id="heroRange">—</strong></div>
+        <div><span>СКОРОСТЬ</span><strong id="heroSpeed">—</strong></div>
+        <div><span>АТРИБУТ</span><strong id="heroAttrText">—</strong></div>
+      </div>
+    </section>
+
+    <section class="loadout-panel dota-panel" aria-labelledby="loadoutTitle">
+      <div class="panel-cap"><span id="loadoutTitle">ИНВЕНТАРЬ</span><b id="buildCost">0</b></div>
+
+      <div class="inventory-stage">
+        <div class="inventory-grid" id="inventoryGrid" aria-label="Шесть предметов сборки"></div>
+
+        <div class="upgrades-row" aria-label="Улучшения героя">
+          <button class="upgrade-slot upgrade-slot--scepter" id="scepterSlotButton" type="button">
+            <img id="scepterImage" alt="Aghanim's Scepter">
+            <div><span>АГАНИМ</span><strong>Aghanim's Scepter</strong></div>
+            <i class="upgrade-check" aria-hidden="true">✓</i>
+          </button>
+          <button class="upgrade-slot upgrade-slot--shard" id="shardSlotButton" type="button">
+            <img id="shardImage" alt="Aghanim's Shard">
+            <div><span>ШАРД</span><strong>Aghanim's Shard</strong></div>
+            <i class="upgrade-check" aria-hidden="true">✓</i>
+          </button>
+        </div>
+      </div>
+
+      <div class="loadout-options">
+        <label class="dota-toggle" for="forceBootSlotToggle">
+          <input id="forceBootSlotToggle" type="checkbox" checked>
+          <span class="dota-toggle__track" aria-hidden="true"><i></i></span>
+          <span class="dota-toggle__copy">
+            <strong>СЛУЧАЙНЫЙ САПОГ В СЛОТЕ 1</strong>
+            <small>Включено по умолчанию. Остальные сапоги исключаются из сборки.</small>
+          </span>
+        </label>
+      </div>
+
+      <div class="item-inspector" id="itemInspector" aria-live="polite">
+        <div class="item-inspector__empty">
+          <span class="mouse-icon" aria-hidden="true"></span>
+          Выбери предмет, чтобы посмотреть детали и дерево сборки. Компоненты внутри тоже можно открывать.
+        </div>
+      </div>
+
+      <div class="loadout-actions">
+        <button class="primary-button" id="generateButton" type="button">
+          <span class="primary-button__flare"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10v2h-1v3.17l3.41 3.41a2 2 0 0 1 0 2.83L16 16.83V20h1v2H7v-2h1v-3.17l-3.41-3.42a2 2 0 0 1 0-2.82L8 7.17V4H7V2Zm3 2v4l-4 4 4 4v4h4v-4l4-4-4-4V4h-4Z"/></svg>
+          ЗАПИЛИТЬ ЗАТАР
+        </button>
+        <button class="secondary-button" id="rerollUnlockedButton" type="button">Перебросить свободные</button>
+      </div>
+
+      <p class="rapier-note">Divine Rapier выпадает отдельным броском: <b>0,35%</b> на полную генерацию.</p>
+    </section>
+
+    <aside class="side-column">
+      <section class="contract-panel dota-panel" aria-labelledby="contractTitle">
+        <div class="panel-cap panel-cap--gold"><span id="contractTitle">КОНТРАКТ РОШАНА</span></div>
+        <div class="contract-seal" aria-hidden="true">
+          <img src="assets/aegis.svg" alt="">
+        </div>
+        <p class="contract-kicker">МОДИФИКАТОР МАТЧА</p>
+        <h2 id="contractName">—</h2>
+        <p id="contractDescription">Дополнительное условие появится вместе со сборкой.</p>
+        <button class="text-button" id="rerollContractButton" type="button">Сменить контракт</button>
+      </section>
+
+      <section class="seed-panel dota-panel" aria-labelledby="seedTitle">
+        <div class="panel-cap"><span id="seedTitle">ЛОББИ ХАОСА</span></div>
+        <p>Одинаковый код создаёт одинакового героя, предметы и контракт.</p>
+        <div class="seed-code-row">
+          <code id="seedCode">--------</code>
+          <button class="copy-button" id="copySeedButton" type="button" aria-label="Скопировать код">КОД</button>
+        </div>
+        <button class="share-button" id="shareButton" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a3.2 3.2 0 0 0 0-1.39l7.05-4.11A3 3 0 1 0 15 5c0 .23.03.46.08.67L8.03 9.78A3 3 0 1 0 8 14.22l7.12 4.16A3 3 0 1 0 18 16.08Z"/></svg>
+          Скопировать ссылку
+        </button>
+      </section>
+
+      <section class="rules-panel dota-panel">
+        <div class="panel-cap"><span>ПРАВИЛА РАНДОМА</span></div>
+        <ul>
+          <li><i class="dot dot--blue"></i> предметы для дальников — только дальникам;</li>
+          <li><i class="dot dot--red"></i> melee-предметы — только ближникам;</li>
+          <li><i class="dot dot--gold"></i> остальное намеренно остаётся хаотичным;</li>
+          <li><i class="dot dot--violet"></i> Аганим и шард входят в каждый челлендж;</li>
+          <li><i class="dot dot--green"></i> при включённой опции первый слот всегда занимает один случайный сапог.</li>
+        </ul>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <p>Неофициальный фан-проект. Dota 2 и игровые материалы принадлежат Valve Corporation.</p>
+    <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Проверить актуальный патч</a>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <template id="inventorySlotTemplate">
+    <article class="inventory-slot" tabindex="0">
+      <div class="inventory-slot__shine"></div>
+      <img alt="">
+      <span class="item-cost"></span>
+      <button class="lock-button" type="button" aria-label="Зафиксировать предмет" title="Сохранить при перебросе">
+        <svg class="lock-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6a5 5 0 0 0-9.9-1H9.2A3 3 0 0 1 15 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Zm0 12H6V10h12v10Zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
+        <svg class="lock-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Zm-9-2a3 3 0 0 1 6 0v2H9V6Zm9 14H6V10h12v10Zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
+      </button>
+      <span class="restriction-badge"></span>
+    </article>
+  </template>
+
+  <script src="app.js?v=1.1" defer></script>
+</body>
+</html>

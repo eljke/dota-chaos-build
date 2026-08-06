@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Chaos Rune</title>
+  <defs>
+    <linearGradient id="g" x1="8" y1="6" x2="55" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e17a61"/>
+      <stop offset=".52" stop-color="#b04434"/>
+      <stop offset="1" stop-color="#63241d"/>
+    </linearGradient>
+  </defs>
+  <path d="M9 8h46v46H9z" fill="#0c1013" stroke="#3b444a" stroke-width="2" transform="rotate(3 32 32)"/>
+  <path d="M12 10l39 3 1 39-42-2z" fill="url(#g)" stroke="#ed9a81" stroke-opacity=".45"/>
+  <path d="M20 17l9 2-5 8 15 15 5-12 5 3-7 17-5-2 1-5-16-14-5 6-4-4 7-14Z" fill="#210c09" opacity=".9"/>
+  <path d="M42 14l7 3-5 8-6-2 4-9ZM15 42l9-5 4 6-9 7-4-8Z" fill="#32110c"/>
+</svg>

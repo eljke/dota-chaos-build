@@ -1,0 +1,16 @@
+{
+  "name": "Dota Chaos Build",
+  "short_name": "Chaos Build",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#080b0e",
+  "theme_color": "#0d1115",
+  "icons": [
+    {
+      "src": "assets/rune.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
