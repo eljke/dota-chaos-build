@@ -165,13 +165,15 @@ const dom = {
   contractsDialog: document.querySelector('#contractsDialog'),
   contractsList: document.querySelector('#contractsList'),
   closeContractsButton: document.querySelector('#closeContractsButton'),
+  releaseNotesButton: document.querySelector('#releaseNotesButton'),
+  releaseNotesDialog: document.querySelector('#releaseNotesDialog'),
+  closeReleaseNotesButton: document.querySelector('#closeReleaseNotesButton'),
   lobbyCodeOutput: document.querySelector('#lobbyCodeOutput'),
   copyLobbyCodeButton: document.querySelector('#copyLobbyCodeButton'),
   lobbyCodeInput: document.querySelector('#lobbyCodeInput'),
   importLobbyCodeButton: document.querySelector('#importLobbyCodeButton'),
   shareButton: document.querySelector('#shareButton'),
   statsLink: document.querySelector('#statsLink'),
-  visitCount: document.querySelector('#visitCount'),
   siteVersion: document.querySelector('#siteVersion'),
   toast: document.querySelector('#toast')
 };
@@ -1004,21 +1006,6 @@ function showToast(message) {
   toastTimer = setTimeout(() => dom.toast.classList.remove('is-visible'), 2400);
 }
 
-function visitLabel(formattedCount) {
-  const value = Number(String(formattedCount).replace(/[^\d]/g, ''));
-
-  if (!Number.isFinite(value)) return 'визитов';
-
-  const lastTwo = value % 100;
-  const lastOne = value % 10;
-
-  if (lastTwo >= 11 && lastTwo <= 14) return 'визитов';
-  if (lastOne === 1) return 'визит';
-  if (lastOne >= 2 && lastOne <= 4) return 'визита';
-
-  return 'визитов';
-}
-
 function initAnalytics() {
   const code = String(globalThis.DCB_ANALYTICS?.goatCounterCode || '').trim().toLowerCase();
   if (!/^[a-z0-9-]+$/.test(code)) return;
@@ -1031,46 +1018,6 @@ function initAnalytics() {
   script.async = true;
   script.src = 'https://gc.zgo.at/count.js';
   script.dataset.goatcounter = `https://${code}.goatcounter.com/count`;
-  script.addEventListener('load', () => {
-    let attempts = 0;
-
-    async function updateVisitCount() {
-      attempts += 1;
-
-      try {
-        const trackedPath =
-            window.goatcounter?.get_data?.().p ||
-            window.location.pathname.replace(/\/+$/, '') ||
-            '/';
-
-        const response = await fetch(
-            `https://${code}.goatcounter.com/counter/${encodeURIComponent(trackedPath)}.json`,
-            { cache: 'no-store' }
-        );
-
-        if (!response.ok) {
-          throw new Error(`GoatCounter returned HTTP ${response.status}`);
-        }
-
-        const payload = await response.json();
-        const count = String(payload.count ?? '').trim();
-
-        if (count) {
-          dom.visitCount.textContent = `${count} ${visitLabel(count)}`;
-          return;
-        }
-      } catch (error) {
-        console.warn('Не удалось загрузить публичный счётчик:', error);
-      }
-
-      // GoatCounter мог ещё не успеть обработать первый визит.
-      if (attempts < 5) {
-        setTimeout(updateVisitCount, 2000);
-      }
-    }
-
-    setTimeout(updateVisitCount, 1500);
-  });
   document.head.append(script);
 }
 
@@ -1086,6 +1033,11 @@ function bindEvents() {
   dom.closeContractsButton.addEventListener('click', () => dom.contractsDialog.close());
   dom.contractsDialog.addEventListener('click', event => {
     if (event.target === dom.contractsDialog) dom.contractsDialog.close();
+  });
+  dom.releaseNotesButton.addEventListener('click', () => dom.releaseNotesDialog.showModal());
+  dom.closeReleaseNotesButton.addEventListener('click', () => dom.releaseNotesDialog.close());
+  dom.releaseNotesDialog.addEventListener('click', event => {
+    if (event.target === dom.releaseNotesDialog) dom.releaseNotesDialog.close();
   });
   dom.forceBootSlotToggle.addEventListener('change', event => setForceBootSlot(event.currentTarget.checked));
   dom.scepterSlotButton.addEventListener('click', () => inspectItem('ultimate_scepter'));
