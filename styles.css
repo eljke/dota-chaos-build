@@ -80,6 +80,17 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border-bottom: 1px solid rgba(133, 154, 167, .15);
 }
 
+.site-version {
+  color: #8e9aa3;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.visit-count {
+  color: #9eb5a5;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;

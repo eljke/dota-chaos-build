@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.2.0">
+  <link rel="stylesheet" href="styles.css?v=1.2.2">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -188,7 +188,12 @@
       <p class="footer__seo">Dota 2 Random — случайный герой, random build, предметы и модификаторы матча.</p>
     </div>
     <div class="footer__links">
-      <span id="visitCount" class="visit-count"></span>
+      <span
+              id="siteVersion"
+              class="site-version"
+              title="Версия сайта"
+      >v…</span>
+      <span id="visitCount" class="visit-count">счётчик обновляется</span>
       <a id="statsLink" href="#" target="_blank" rel="noreferrer" hidden>Статистика посещений</a>
       <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Официальные обновления</a>
     </div>
@@ -218,6 +223,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script src="app.js?v=1.2.1" defer></script>
+  <script src="app.js?v=1.2.2" defer></script>
 </body>
 </html>

@@ -239,6 +239,7 @@ const dom = {
   shareButton: document.querySelector('#shareButton'),
   statsLink: document.querySelector('#statsLink'),
   visitCount: document.querySelector('#visitCount'),
+  siteVersion: document.querySelector('#siteVersion'),
   toast: document.querySelector('#toast')
 };
 
@@ -375,11 +376,34 @@ async function loadRemoteData() {
 async function loadMeta() {
   for (const url of CONFIG.metaSources) {
     try {
-      return await fetchJson(url, 5000);
+      const meta = await fetchJson(url, 5000);
+
+      if (dom.siteVersion) {
+        const version = String(meta.siteVersion || '').trim();
+        const revision = String(meta.siteRevision || '').trim();
+
+        dom.siteVersion.textContent = version
+            ? `v${version}`
+            : revision
+                ? `build ${revision}`
+                : 'dev';
+
+        dom.siteVersion.title = revision
+            ? `Версия сайта ${version || 'dev'} · сборка ${revision}`
+            : `Версия сайта ${version || 'dev'}`;
+      }
+
+      return meta;
     } catch (error) {
       console.info('Patch metadata is unavailable:', error);
     }
   }
+
+  if (dom.siteVersion) {
+    dom.siteVersion.textContent = 'dev';
+    dom.siteVersion.title = 'Метаданные версии недоступны';
+  }
+
   return null;
 }
 

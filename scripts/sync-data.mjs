@@ -128,7 +128,22 @@ const [{ patch, patchSource, patchTimestamp }, constants, constantsSynced] = awa
   syncConstants()
 ]);
 
+let siteVersion = 'dev';
+
+try {
+  siteVersion = (
+      await readFile(new URL('../VERSION', import.meta.url), 'utf8')
+  ).trim() || 'dev';
+} catch {
+  console.warn('VERSION file not found');
+}
+
+const siteRevision =
+    String(process.env.GITHUB_SHA || '').slice(0, 7) || null;
+
 const meta = {
+  siteVersion,
+  siteRevision,
   patch,
   patchSource,
   patchTimestamp,
