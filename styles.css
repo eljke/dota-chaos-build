@@ -81,15 +81,21 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 }
 
 .site-version {
+  padding: 0;
+  display: inline-flex;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid #59656c;
+  background: transparent;
   color: #8e9aa3;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-
-.visit-count {
-  color: #9eb5a5;
-}
+.site-version:hover, .site-version:focus-visible { color: #d2c19d; border-bottom-color: #9a7b48; }
+.site-version span:last-child { color: #66737b; font-size: 9px; }
 
 .brand {
   display: inline-flex;
@@ -1121,6 +1127,15 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .contracts-dialog__head button {
   width: 36px; height: 36px; border: 1px solid #46525a; background: #12181c; color: #aeb7bc; font-size: 24px; cursor: pointer;
 }
+.release-dialog { width: min(680px, calc(100% - 28px)); }
+.release-notes { padding: 10px; display: grid; gap: 8px; overflow: auto; }
+.release-notes article { padding: 14px; border: 1px solid #2e383e; background: #0d1215; }
+.release-notes article:first-child { border-color: #8a7043; background: linear-gradient(90deg, rgba(118, 86, 38, .18), #0d1215); }
+.release-notes header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.release-notes h3 { margin: 0; color: #d2c19d; font: 500 19px Georgia, serif; }
+.release-notes time { color: #657279; font-size: 9px; }
+.release-notes ul { margin: 9px 0 0; padding-left: 18px; color: #89959c; font-size: 10px; line-height: 1.6; }
+.release-notes li + li { margin-top: 4px; }
 .contracts-list { padding: 10px; display: grid; gap: 7px; overflow: auto; }
 .contract-catalog-item {
   padding: 11px 12px;
@@ -1137,7 +1152,6 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 
 .footer__seo { margin-top: 4px !important; color: #3f494f; }
 .footer__links { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 14px; }
-.visit-count { color: #667c69; }
 
 @media (max-width: 820px) {
   .intro-copy { width: min(100% - 24px, 720px); }
