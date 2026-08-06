@@ -1,5 +1,9 @@
 'use strict';
 
+import { generateBuild, pick, seededRandom } from './js/generator.js';
+import { decodeBuildCode, encodeBuildCode } from './js/build-code.js';
+import { MODIFIERS as CONTRACTS } from './js/modifiers.js';
+
 const CONFIG = {
   patchFallback: '7.41e',
   rapierChance: 0.0035,
@@ -73,49 +77,6 @@ const ATTR_GLYPH = { str: 'S', agi: 'A', int: 'I', all: 'U' };
 const QUALITY_RU = {
   common: 'ОБЫЧНЫЙ', uncommon: 'НЕОБЫЧНЫЙ', rare: 'РЕДКИЙ', epic: 'ЭПИЧЕСКИЙ', artifact: 'АРТЕФАКТ'
 };
-
-const CONTRACTS = [
-  { name: 'Жадный Аганим', description: "Aghanim's Scepter должен стать одним из первых трёх полностью собранных крупных предметов." },
-  { name: 'Осколок судьбы', description: "Купи Aghanim's Shard при первой безопасной возможности после 15:00 — до следующего предмета дороже 3000." },
-  { name: 'Без возврата', description: 'Нельзя продавать или разбирать полностью собранные предметы из выданной шестёрки.' },
-  { name: 'Лестница нетворса', description: 'Завершай основные предметы по возрастанию цены: от самого дешёвого к самому дорогому.' },
-  { name: 'Последняя роскошь', description: 'Самый дорогой предмет сборки разрешено завершить только шестым.' },
-  { name: 'Чистый Quick Buy', description: 'В Quick Buy может находиться только текущий предмет и его компоненты — без заготовок на следующий.' },
-  { name: 'Рошан решает', description: 'После первого убийства Рошана вашей командой следующая крупная покупка — Аганим или шард.' },
-  { name: 'Компонент долга', description: 'После каждой второй смерти первым делом купи компонент самого дешёвого незавершённого предмета.' },
-  { name: 'Шард до роскоши', description: "Aghanim's Shard должен быть куплен раньше любого предмета стоимостью 5000 золота и выше." },
-  { name: 'Неподвижный слот', description: 'Первый завершённый предмет занимает выбранный слот инвентаря до конца матча и не перемещается.' },
-  { name: 'Один путь', description: 'После покупки первого компонента предмета нельзя переключаться на сборку другого крупного предмета.' },
-  { name: 'Налог на камбэк', description: 'После выигранной драки с тремя и более убийствами потрать доступное золото только на выданную сборку.' },
-  { name: 'Левый карман', description: 'Предметы нужно собирать строго слева направо по слотам. Перепрыгивать через незавершённый слот нельзя.' },
-  { name: 'Сапоговый суверенитет', description: 'Сапог из первого слота нельзя улучшать, продавать или перекладывать до 25:00.' },
-  { name: 'Курьер за реку не ходит', description: 'До 20:00 курьер не может пересекать реку. Забирай доставку на своей половине карты.' },
-  { name: 'Бедный, но быстрый', description: 'После каждого возвращения на базу сначала потрать золото на самый дешёвый доступный компонент.' },
-  { name: 'Руна бухгалтерии', description: 'После каждой взятой руны богатства следующая покупка должна быть компонентом выданной сборки.' },
-  { name: 'Без мелочи', description: 'После 15:00 нельзя покидать базу, имея больше 1200 ненужного золота при доступном компоненте.' },
-  { name: 'Три смерти — один дым', description: 'После каждой третьей смерти купи Smoke of Deceit и используй его с союзником до следующей драки.' },
-  { name: 'Телепортная дисциплина', description: 'После 10:00 в инвентаре всегда должен быть хотя бы один Town Portal Scroll.' },
-  { name: 'Мидас не ждёт', description: 'Если выпал Hand of Midas, его активную способность нельзя держать готовой дольше 20 секунд.' },
-  { name: 'Жадный курьер', description: 'Курьер может доставлять только компоненты текущего предмета; заготовки на следующий запрещены.' },
-  { name: 'Сломанный магазин', description: 'Каждый крупный предмет собирай по компонентам слева направо, как они показаны в дереве сборки.' },
-  { name: 'Аванс за убийство', description: 'После убийства вражеского героя до следующей драки купи хотя бы один компонент сборки.' },
-  { name: 'Пособие по выживанию', description: 'После двух смертей подряд следующая покупка должна давать здоровье, броню или сопротивление магии, если такой компонент есть.' },
-  { name: 'Кнопка за 1400', description: 'Шард нужно купить ровно первой крупной покупкой после 15:00, независимо от текущего предмета.' },
-  { name: 'Аганим в кредит', description: 'После покупки первого компонента Аганима нельзя покупать компоненты других крупных предметов до его завершения.' },
-  { name: 'Рошанова десятина', description: 'После каждого убийства Рошана зарезервируй следующие 1000 золота только под Аганим, шард или текущий предмет.' },
-  { name: 'Никаких распродаж', description: 'Нельзя продавать стартовые предметы, пока не завершены минимум два предмета из выданной сборки.' },
-  { name: 'Шесть витрин', description: 'Каждый готовый предмет должен занимать свой исходный слот; менять порядок готовых предметов нельзя.' },
-  { name: 'Дорогой финал', description: 'Предмет стоимостью выше 5000 нельзя завершать до 30:00.' },
-  { name: 'Дешёвый финал', description: 'Самый дешёвый предмет сборки обязан быть завершён последним.' },
-  { name: 'Один активный', description: 'До завершения третьего предмета одновременно можно носить не больше одного активного предмета из сборки.' },
-  { name: 'Пыльная работа', description: 'После появления невидимого героя во вражеской команде всегда носи Dust до конца матча.' },
-  { name: 'Слот памяти', description: 'Предмет, с которым сделан первый килл, нельзя перемещать из его слота до конца матча.' },
-  { name: 'Пять минут хаоса', description: 'На каждой отметке 5:00, 10:00, 15:00 и далее купи компонент текущего предмета, если хватает золота.' },
-  { name: 'Ноль предзаказов', description: 'Запрещено покупать компоненты следующего предмета, пока текущий не собран полностью.' },
-  { name: 'Двойная ставка', description: 'После двойного убийства начни собирать самый дорогой ещё не завершённый предмет.' },
-  { name: 'Смертельная экономия', description: 'После смерти нельзя покупать ничего до возрождения; затем первая покупка — компонент сборки.' },
-  { name: 'Ночной магазин', description: 'После 30:00 крупные покупки разрешены только во время ночного цикла.' }
-];
 
 const FALLBACK_HEROES = [
   ['antimage', 'Anti-Mage', 'agi', 'Melee', ['Carry', 'Escape', 'Nuker'], 150, 310],
@@ -422,33 +383,6 @@ function setDataState(mode, text) {
   dom.dataState.innerHTML = `<i></i>${text}`;
 }
 
-function xmur3(text) {
-  let h = 1779033703 ^ text.length;
-  for (let i = 0; i < text.length; i += 1) {
-    h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return function seedHash() {
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return (h ^= h >>> 16) >>> 0;
-  };
-}
-
-function mulberry32(seed) {
-  return function random() {
-    let value = seed += 0x6D2B79F5;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function seededRandom(seedText) {
-  const hash = xmur3(seedText);
-  return mulberry32(hash());
-}
-
 function randomSeed() {
   const bytes = new Uint32Array(2);
   if (globalThis.crypto?.getRandomValues) {
@@ -458,19 +392,6 @@ function randomSeed() {
     bytes[1] = Math.floor(Math.random() * 0xffffffff);
   }
   return ((BigInt(bytes[0]) << 32n) | BigInt(bytes[1])).toString(36).slice(0, 8).toUpperCase().padEnd(8, '0');
-}
-
-function pick(list, rng) {
-  return list[Math.floor(rng() * list.length)];
-}
-
-function shuffle(list, rng) {
-  const result = [...list];
-  for (let i = result.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
 }
 
 function isCompatible(item, hero) {
@@ -512,34 +433,18 @@ function inspectItem(key, selectedIndex = null) {
 }
 
 function makeBuild(seed) {
-  const rng = seededRandom(`build:${seed}:${state.forceBootSlot ? 'boot' : 'free'}`);
-  const hero = pick(state.heroes, rng);
-  const items = [];
-  const used = new Set();
-
-  if (state.forceBootSlot) {
-    const boots = bootPool(hero);
-    const boot = pick(boots, rng);
-    if (boot) {
-      items.push(boot);
-      used.add(boot.key);
-    }
-  }
-
-  const pool = shuffle(compatiblePool(hero, used, { excludeBoots: state.forceBootSlot }), rng);
-  items.push(...pool.slice(0, 6 - items.length));
-
-  if (state.itemsByKey.rapier && rng() < CONFIG.rapierChance && items.length === 6) {
-    const firstAllowedIndex = state.forceBootSlot ? 1 : 0;
-    const index = firstAllowedIndex + Math.floor(rng() * (items.length - firstAllowedIndex));
-    items[index] = state.itemsByKey.rapier;
-  }
-
-  return {
-    hero,
-    items,
-    contractIndex: Math.floor(rng() * CONTRACTS.length)
-  };
+  const build = generateBuild({
+    seed,
+    forceBootSlot: state.forceBootSlot,
+    heroes: state.heroes,
+    itemPool: state.itemPool,
+    itemsByKey: state.itemsByKey,
+    bootKeys: BOOT_KEYS,
+    isCompatible,
+    modifierCount: CONTRACTS.length,
+    rapierChance: CONFIG.rapierChance
+  });
+  return { ...build, contractIndex: build.modifierIndex };
 }
 
 function generateFull(seed = randomSeed(), options = {}) {
@@ -923,25 +828,8 @@ function renderContractsCatalog() {
     </article>`).join('');
 }
 
-function encodeLobbyCode(paramsText) {
-  const binary = btoa(unescape(encodeURIComponent(paramsText)));
-  return `DCB1-${binary.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
-}
-
-function decodeLobbyCode(code) {
-  const normalized = String(code || '').trim().replace(/\s+/g, '');
-  if (!normalized.toUpperCase().startsWith('DCB1-')) return null;
-  const payload = normalized.slice(5).replace(/-/g, '+').replace(/_/g, '/');
-  const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
-  try {
-    return decodeURIComponent(escape(atob(padded)));
-  } catch {
-    return null;
-  }
-}
-
 function currentLobbyCode() {
-  return state.hero && state.items.length === 6 ? encodeLobbyCode(serializeBuild()) : '';
+  return state.hero && state.items.length === 6 ? encodeBuildCode(serializeBuild()) : '';
 }
 
 function renderSeed() {
@@ -1059,7 +947,7 @@ function importLobbyCode() {
     return;
   }
 
-  const decoded = decodeLobbyCode(raw);
+  const decoded = decodeBuildCode(raw);
   const shared = decoded ? parseBuildParams(decoded) : null;
   if (!shared) {
     showToast('Код не распознан или содержит несовместимую сборку.');
