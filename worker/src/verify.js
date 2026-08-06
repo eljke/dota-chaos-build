@@ -1,3 +1,5 @@
+import { modifierById } from '../../js/modifiers.js';
+
 const NORMAL_GAME_MODES = new Set([1, 2, 3, 4, 5, 12, 16, 17, 22]);
 const PUBLIC_LOBBIES = new Set([0, 5, 6, 7, 9]);
 
@@ -8,6 +10,53 @@ function firstPurchaseIndex(purchaseLog, item) {
 export function calculateScore({ rerolls, orderRequired, modifierMultiplier = 1 }) {
   const orderMultiplier = orderRequired ? 1.2 : 1;
   return Math.round(1000 * modifierMultiplier * orderMultiplier / (rerolls + 1));
+}
+
+export function verifyModifier({ modifierId, match, player, attempt }) {
+  const modifier = modifierById(modifierId);
+  if (!modifier) return { ok: !modifierId, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };
+
+  const turbo = attempt.mode === 'turbo';
+  const purchases = player.purchase || {};
+  const uses = player.item_uses || {};
+  const log = player.purchase_log;
+  const teamKills = Number(player.player_slot) < 128 ? Number(match.radiant_score) : Number(match.dire_score);
+  const participation = teamKills > 0 ? (Number(player.kills) + Number(player.assists)) / teamKills : 0;
+  const kda = (Number(player.kills) + Number(player.assists)) / Math.max(1, Number(player.deaths));
+  let ok = false;
+  let value;
+
+  switch (modifier.id) {
+    case 'no-buyback': value = Number(player.buyback_count || 0); ok = value === 0; break;
+    case 'teamfight': value = participation; ok = value >= 0.5; break;
+    case 'tower-pressure': value = Number(player.tower_damage || 0); ok = value >= (turbo ? 2000 : 3000); break;
+    case 'rune-control': value = Number(player.rune_pickups || 0); ok = value >= (turbo ? 4 : 6); break;
+    case 'clean-kda': value = { kda, participation }; ok = kda >= 4 && participation >= 0.35; break;
+    case 'camp-stacker': value = Number(player.camps_stacked || 0); ok = value >= (turbo ? 2 : 3); break;
+    case 'vision': value = Number(player.obs_placed || 0) + Number(player.sen_placed || 0); ok = value >= (turbo ? 6 : 8); break;
+    case 'smoke-operation': {
+      value = { purchased: Number(purchases.smoke_of_deceit || 0), used: Number(uses.smoke_of_deceit || 0) };
+      const target = turbo ? 1 : 2;
+      ok = value.purchased >= target && value.used >= target;
+      break;
+    }
+    case 'aghanim-early': {
+      const aghanim = log.findIndex(entry => entry?.key === 'ultimate_scepter');
+      const thirdItem = firstPurchaseIndex(log, attempt.items[2]);
+      value = { aghanim, thirdItem };
+      ok = aghanim >= 0 && thirdItem >= 0 && aghanim < thirdItem;
+      break;
+    }
+    case 'shard-before-luxury': {
+      const shard = log.findIndex(entry => entry?.key === 'aghanims_shard');
+      const luxury = Math.min(...attempt.items.filter(item => Number(item.cost) >= 5000).map(item => firstPurchaseIndex(log, item)).filter(index => index >= 0));
+      value = { shard, firstLuxury: luxury };
+      ok = shard >= 0 && Number.isFinite(luxury) && shard < luxury;
+      break;
+    }
+  }
+
+  return { ok, error: ok ? null : `Не выполнен модификатор «${modifier.name}»: ${modifier.description}`, evidence: { id: modifier.id, value } };
 }
 
 export function verifyMatch({ match, attempt, accountId }) {
@@ -48,6 +97,9 @@ export function verifyMatch({ match, attempt, accountId }) {
     errors.push('Предметы завершены не в выданном порядке.');
   }
 
+  const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
+  if (!modifierProof.ok && modifierProof.error) errors.push(modifierProof.error);
+
   return {
     ok: errors.length === 0,
     parsed: true,
@@ -59,7 +111,8 @@ export function verifyMatch({ match, attempt, accountId }) {
       finalItemIds: finalIds,
       duration: Number(match.duration),
       gameMode: Number(match.game_mode),
-      lobbyType: Number(match.lobby_type)
+      lobbyType: Number(match.lobby_type),
+      modifier: modifierProof.evidence
     }
   };
 }
