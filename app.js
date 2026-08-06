@@ -1080,6 +1080,20 @@ function showToast(message) {
   toastTimer = setTimeout(() => dom.toast.classList.remove('is-visible'), 2400);
 }
 
+function visitLabel(formattedCount) {
+  const value = Number(String(formattedCount).replace(/[^\d]/g, ''));
+
+  if (!Number.isFinite(value)) return 'визитов';
+
+  const lastTwo = value % 100;
+  const lastOne = value % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) return 'визитов';
+  if (lastOne === 1) return 'визит';
+  if (lastOne >= 2 && lastOne <= 4) return 'визита';
+
+  return 'визитов';
+}
 
 function initAnalytics() {
   const code = String(globalThis.DCB_ANALYTICS?.goatCounterCode || '').trim().toLowerCase();
@@ -1093,16 +1107,40 @@ function initAnalytics() {
   script.async = true;
   script.src = 'https://gc.zgo.at/count.js';
   script.dataset.goatcounter = `https://${code}.goatcounter.com/count`;
-  script.addEventListener('load', async () => {
-    try {
-      const path = encodeURIComponent(window.location.pathname);
-      const response = await fetch(`https://${code}.goatcounter.com/counter/${path}.json`);
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (payload.count) dom.visitCount.textContent = `${payload.count} визитов`;
-    } catch {
-      // Public counter may be disabled; the private dashboard still works.
+  script.addEventListener('load', () => {
+    let attempts = 0;
+
+    async function updateVisitCount() {
+      attempts += 1;
+
+      try {
+        const response = await fetch(
+            `https://${code}.goatcounter.com/counter/TOTAL.json`,
+            { cache: 'no-store' }
+        );
+
+        if (!response.ok) {
+          throw new Error(`GoatCounter returned HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const count = String(payload.count ?? '').trim();
+
+        if (count) {
+          dom.visitCount.textContent = `${count} ${visitLabel(count)}`;
+          return;
+        }
+      } catch (error) {
+        console.warn('Не удалось загрузить публичный счётчик:', error);
+      }
+
+      // GoatCounter мог ещё не успеть обработать первый визит.
+      if (attempts < 5) {
+        setTimeout(updateVisitCount, 2000);
+      }
     }
+
+    setTimeout(updateVisitCount, 1500);
   });
   document.head.append(script);
 }
