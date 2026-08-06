@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.4.0">
+  <link rel="stylesheet" href="styles.css?v=1.5.0">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -191,7 +191,7 @@
           <button class="secondary-button" id="rankedLoginButton" type="button">Войти через Steam</button>
           <button class="text-button" id="rankedLogoutButton" type="button" hidden>Выйти</button>
         </div>
-        <p class="ranked-explain">Сервер выдаёт сборку и считает все полные рероллы. После победы OpenDota проверит героя, шесть предметов, Аганим, шард и — по желанию — порядок покупок.</p>
+        <p class="ranked-explain">Сервер выдаёт сборку с проверяемым модификатором и считает все полные рероллы. После победы OpenDota проверит героя, предметы, модификатор и — по желанию — порядок покупок.</p>
         <div class="ranked-settings">
           <label>РЕЖИМ<select id="rankedMode"><option value="normal">Обычный</option><option value="turbo">Turbo</option></select></label>
           <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span>Собрать в указанном порядке <b>+20%</b></span></label>
@@ -256,6 +256,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.4.0"></script>
+  <script type="module" src="app.js?v=1.5.0"></script>
 </body>
 </html>
