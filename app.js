@@ -1114,8 +1114,13 @@ function initAnalytics() {
       attempts += 1;
 
       try {
+        const trackedPath =
+            window.goatcounter?.get_data?.().p ||
+            window.location.pathname.replace(/\/+$/, '') ||
+            '/';
+
         const response = await fetch(
-            `https://${code}.goatcounter.com/counter/TOTAL.json`,
+            `https://${code}.goatcounter.com/counter/${encodeURIComponent(trackedPath)}.json`,
             { cache: 'no-store' }
         );
 
