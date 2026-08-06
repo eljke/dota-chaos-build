@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import process from 'node:process';
+import { BOOT_KEYS, ITEM_KEY_ALIASES, ITEM_POOL_KEYS } from '../js/item-rules.js';
 
 const DATA_DIR = new URL('../data/', import.meta.url);
 const USER_AGENT = 'dota-chaos-build-sync/1.2 (+https://eljke.github.io/dota-chaos-build/)';
@@ -108,11 +109,39 @@ async function syncConstants() {
       fetchText(`${CONSTANTS_BASE}/heroes.json`),
       fetchText(`${CONSTANTS_BASE}/items.json`)
     ]);
-    JSON.parse(heroesText);
-    JSON.parse(itemsText);
+    const heroes = JSON.parse(heroesText);
+    const items = JSON.parse(itemsText);
+    const rankedItems = [...new Set([...ITEM_POOL_KEYS, ...BOOT_KEYS, 'rapier'])]
+      .map(key => {
+        const sourceKey = ITEM_KEY_ALIASES[key] || key;
+        const item = items[sourceKey];
+        if (!item?.id || !item?.img) return null;
+        return {
+          id: Number(item.id),
+          key,
+          sourceKey,
+          name: item.dname || key,
+          cost: Number(item.cost) || 0
+        };
+      })
+      .filter(Boolean);
+    const rankedPool = {
+      generatedAt: new Date().toISOString(),
+      heroes: Object.values(heroes)
+        .filter(hero => hero?.id && hero?.name && hero?.localized_name)
+        .map(hero => ({
+          id: Number(hero.id),
+          key: String(hero.name).replace('npc_dota_hero_', ''),
+          name: hero.localized_name,
+          attack_type: hero.attack_type,
+          roles: hero.roles || []
+        })),
+      items: rankedItems
+    };
     await Promise.all([
       writeFile(new URL('heroes.json', DATA_DIR), heroesText),
-      writeFile(new URL('items.json', DATA_DIR), itemsText)
+      writeFile(new URL('items.json', DATA_DIR), itemsText),
+      writeFile(new URL('ranked-pool.json', DATA_DIR), `${JSON.stringify(rankedPool)}\n`)
     ]);
     return true;
   } catch (error) {

@@ -1,6 +1,6 @@
 # Dota Chaos Build
 
-Статический Dota 2 Random-генератор: случайный герой, шесть предметов, Aghanim's Scepter, Aghanim's Shard и дополнительный модификатор матча. Проект рассчитан на GitHub Pages и не требует собственного сервера.
+Dota 2 Random-генератор со статическим интерфейсом на GitHub Pages и отдельным Cloudflare Worker для подтверждённого ranked-режима.
 
 ## Возможности
 
@@ -17,6 +17,8 @@
 - SEO-разметка, `robots.txt`, `sitemap.xml`, Open Graph и Schema.org;
 - подключаемая статистика посещений через GoatCounter;
 - автоматическое обновление патча и снимка `odota/dotaconstants` при каждом деплое и ежедневно.
+- ranked-сборки с серверным учётом рероллов, необязательным порядком покупки и проверкой победы по OpenDota match ID;
+- Steam OpenID и лидерборды Normal/Turbo в Cloudflare D1.
 
 ## Локальный запуск
 
@@ -43,7 +45,20 @@ Workflow перед публикацией:
 1. скачивает свежие `heroes.json` и `items.json` из `odota/dotaconstants`;
 2. проверяет официальный Dota 2 patchnotes datafeed и определяет последний номер gameplay-патча;
 3. создаёт `data/meta.json`;
-4. публикует полученный снимок на GitHub Pages.
+4. создаёт компактный `data/ranked-pool.json` для серверного генератора;
+5. публикует полученный снимок на GitHub Pages.
+
+## Ranked API
+
+Worker настраивается через `wrangler.jsonc`, схема D1 хранится в `worker/migrations`. Формула базовых очков: `round(1000 × 1.2 при строгом порядке / (рероллы + 1))`. В лидерборд идёт сумма 10 лучших подтверждённых побед игрока; Normal и Turbo считаются отдельно.
+
+```bash
+npm install
+npm test
+npm run typecheck
+npx wrangler d1 migrations apply dota-chaos-ranked --remote
+npm run worker:deploy
+```
 
 Также workflow запускается ежедневно по расписанию. Если внешний источник временно недоступен, браузер использует резервные CDN-источники и встроенный набор данных.
 
