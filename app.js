@@ -41,6 +41,12 @@ const BOOT_KEYS = [
   'travel_boots', 'travel_boots_2', 'guardian_greaves', 'boots_of_bearing'
 ];
 const BOOT_KEY_SET = new Set(BOOT_KEYS);
+const ITEM_KEY_ALIASES = Object.freeze({
+  battlefury: 'bfury',
+  parasma: 'devastator',
+  gleipnir: 'gungir'
+});
+
 const RANGED_ONLY = new Set(['dragon_lance', 'hurricane_pike', 'specialists_array', 'hydras_breath']);
 const MELEE_ONLY = new Set(['battlefury', 'basher', 'abyssal_blade', 'echo_sabre', 'harpoon']);
 const EXCLUDED_GENERIC = new Set([
@@ -273,8 +279,15 @@ function normalizeItems(raw) {
   const output = {};
   for (const [key, item] of Object.entries(raw || {})) {
     if (!item || !item.dname || !item.img) continue;
-    output[key] = { ...item, key };
+    output[key] = { ...item, key, sourceKey: key };
   }
+
+  for (const [publicKey, sourceKey] of Object.entries(ITEM_KEY_ALIASES)) {
+    const source = output[sourceKey];
+    if (!source) continue;
+    output[publicKey] = { ...source, key: publicKey, sourceKey };
+  }
+
   return output;
 }
 
@@ -677,7 +690,8 @@ function itemDescription(item) {
 
 function recipeComponents(item) {
   const keys = Array.isArray(item?.components) ? [...item.components] : [];
-  const recipeKey = item?.key ? `recipe_${item.key}` : '';
+  const sourceKey = item?.sourceKey || item?.key || '';
+  const recipeKey = sourceKey ? `recipe_${sourceKey}` : '';
   const recipe = recipeKey ? state.itemsByKey[recipeKey] : null;
   if (recipe && Number(recipe.cost) > 0 && !keys.includes(recipeKey)) keys.push(recipeKey);
   return keys.map(key => state.itemsByKey[key]).filter(Boolean);
