@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.5.0">
+  <link rel="stylesheet" href="styles.css?v=1.5.1">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -221,12 +221,9 @@
       <p class="footer__seo">Dota 2 Random — случайный герой, random build, предметы и модификаторы матча.</p>
     </div>
     <div class="footer__links">
-      <span
-              id="siteVersion"
-              class="site-version"
-              title="Версия сайта"
-      >v…</span>
-      <span id="visitCount" class="visit-count">счётчик обновляется</span>
+      <button class="site-version" id="releaseNotesButton" type="button" aria-haspopup="dialog" aria-controls="releaseNotesDialog">
+        <span id="siteVersion">v…</span><span>Что нового</span>
+      </button>
       <a id="statsLink" href="#" target="_blank" rel="noreferrer" hidden>Статистика посещений</a>
       <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Официальные обновления</a>
     </div>
@@ -238,6 +235,38 @@
       <button id="closeContractsButton" type="button" aria-label="Закрыть">×</button>
     </div>
     <div class="contracts-list" id="contractsList"></div>
+  </dialog>
+
+  <dialog class="contracts-dialog release-dialog" id="releaseNotesDialog" aria-labelledby="releaseNotesTitle">
+    <div class="contracts-dialog__head">
+      <div><span>ИСТОРИЯ ОБНОВЛЕНИЙ</span><h2 id="releaseNotesTitle">Что нового</h2></div>
+      <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="release-notes">
+      <article>
+        <header><h3>1.5.1</h3><time datetime="2026-08-06">6 августа 2026</time></header>
+        <ul><li>Добавили доступную прямо на сайте историю обновлений.</li></ul>
+      </article>
+      <article>
+        <header><h3>1.5.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
+        <ul>
+          <li>Переработали модификаторы: теперь каждый ranked-челлендж можно подтвердить данными матча.</li>
+          <li>Добавили бонус сложности модификатора и фильтрацию заданий по роли героя и сборке.</li>
+        </ul>
+      </article>
+      <article>
+        <header><h3>1.4.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
+        <ul>
+          <li>Запустили ranked: сервер выдаёт сборку и учитывает каждый полный реролл.</li>
+          <li>Добавили Steam-вход, подтверждение победы по match ID и лидерборды Normal/Turbo.</li>
+          <li>Строгий порядок покупки можно включить перед стартом за бонус к очкам.</li>
+        </ul>
+      </article>
+      <article>
+        <header><h3>1.3.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
+        <ul><li>Сделали генерацию и коды сборок стабильнее между обновлениями сайта.</li></ul>
+      </article>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -256,6 +285,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.5.0"></script>
+  <script type="module" src="app.js?v=1.5.1"></script>
 </body>
 </html>
