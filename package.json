@@ -1,0 +1,8 @@
+{
+  "name": "dota-chaos-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
