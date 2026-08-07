@@ -23,8 +23,10 @@ function itemImage(item) {
 
 function formatCountdown(seconds) {
   const safe = Math.max(0, Math.ceil(seconds));
-  const minutes = Math.floor(safe / 60);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
   const rest = safe % 60;
+  if (hours) return `${hours}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
   return minutes ? `${minutes}:${String(rest).padStart(2, '0')}` : `${rest} сек.`;
 }
 
@@ -50,6 +52,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   let attempt = null;
   let busy = false;
   let cooldownUntil = 0;
+  let verificationRetryUntil = 0;
   let countdownTimer = null;
 
   function setView(view) {
@@ -146,7 +149,9 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.order.disabled = busy || Boolean(attempt);
     ui.reroll.disabled = busy || !attempt;
     ui.cancel.disabled = busy || !attempt;
-    ui.submit.disabled = busy || !attempt;
+    const verificationWait = Math.max(0, verificationRetryUntil - nowSeconds());
+    ui.submit.disabled = busy || !attempt || verificationWait > 0;
+    ui.submit.textContent = verificationWait > 0 ? `ПОВТОРИТЬ ЧЕРЕЗ ${formatCountdown(verificationWait)}` : 'ПРОВЕРИТЬ ПОБЕДУ';
     ui.match.disabled = busy || !attempt;
     renderUser();
     renderAttempt();
@@ -185,7 +190,10 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       await callback();
     } catch (error) {
       if (error.body?.attempt) attempt = error.body.attempt;
-      if (error.body?.retryAfter) cooldownUntil = nowSeconds() + Number(error.body.retryAfter);
+      if (error.body?.retryAfter) {
+        if (error.body?.code === 'cancel_cooldown') cooldownUntil = nowSeconds() + Number(error.body.retryAfter);
+        else verificationRetryUntil = nowSeconds() + Number(error.body.retryAfter);
+      }
       setStatus(error.message, 'error');
     } finally {
       busy = false;
@@ -206,6 +214,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     token = '';
     user = null;
     attempt = null;
+    verificationRetryUntil = 0;
     setStatus('Вы вышли из ranked.');
     render();
   });
@@ -216,11 +225,13 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       body: JSON.stringify({ mode: ui.mode.value, orderRequired: ui.order.checked })
     });
     attempt = data.attempt;
+    verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
     setStatus('Сборка активирована сервером. Частичных замков в ranked нет.', 'ok');
   }, 'Сервер выбирает героя и сборку…'));
   ui.reroll.addEventListener('click', () => action(async () => {
     const data = await request(`/attempts/${attempt.id}/reroll`, { method: 'POST', body: '{}' });
     attempt = data.attempt;
+    verificationRetryUntil = 0;
     setStatus('Вся сборка переброшена. Штраф и новое защитное окно уже учтены.', 'ok');
   }, 'Перебрасываем всю сборку…'));
   ui.cancel.addEventListener('click', () => ui.cancelDialog.showModal());
@@ -235,6 +246,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       const data = await request(`/attempts/${attempt.id}/cancel`, { method: 'POST', body: '{}' });
       cooldownUntil = Number(data.cooldownUntil || 0);
       attempt = null;
+      verificationRetryUntil = 0;
       ui.match.value = '';
       setStatus(`Попытка отменена. Накопленный штраф отмен: ${data.cancelPenalties}.`, 'ok');
     }, 'Отменяем попытку…');
@@ -244,11 +256,14 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       method: 'POST',
       body: JSON.stringify({ matchId: ui.match.value.trim() })
     });
-    if (data.status === 'parsing') {
-      setStatus(data.message || 'OpenDota разбирает реплей. Повторите проверку позже.');
+    if (data.status === 'parsing' || data.status === 'waiting_provider') {
+      verificationRetryUntil = nowSeconds() + Number(data.retryAfter || 60);
+      setStatus(data.message || 'Матч ожидает серверной проверки. Повторите позже.');
       return;
     }
-    setStatus(`Победа подтверждена: +${data.score} очков.`, 'ok');
+    verificationRetryUntil = 0;
+    const source = data.source === 'stratz' ? ' · резерв STRATZ' : '';
+    setStatus(`Победа подтверждена: +${data.score} очков${source}.`, 'ok');
     onMessage(`Ranked-победа подтверждена: +${data.score}`);
     attempt = null;
     ui.match.value = '';
@@ -277,6 +292,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       ({ user } = await request('/me'));
       if (!user) throw new Error('Сессия закончилась.');
       ({ attempt } = await request('/attempts/active'));
+      verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       token = '';
@@ -288,7 +304,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   clearInterval(countdownTimer);
   countdownTimer = setInterval(() => {
     renderEligibility();
-    if (cooldownUntil > nowSeconds()) renderControls();
+    if (cooldownUntil > 0 || verificationRetryUntil > 0) renderControls();
   }, 1000);
   render();
   await loadLeaderboard();

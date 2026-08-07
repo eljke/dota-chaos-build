@@ -2,6 +2,7 @@ import { generateBuild, seededRandom } from '../../js/generator.js';
 import { BOOT_KEYS, isItemCompatible } from '../../js/item-rules.js';
 import { eligibleModifiers, modifierById } from '../../js/modifiers.js';
 import { calculateScore, verifyMatch } from './verify.js';
+import { normalizeStratzMatch, openDotaRateLimit } from './providers.js';
 
 type JsonObject = Record<string, unknown>;
 type RankedItem = { id: number; key: string; sourceKey: string; name: string; cost: number };
@@ -10,12 +11,15 @@ type RankedPool = { generatedAt: string; heroes: RankedHero[]; items: RankedItem
 type UserRow = { steam_id: string; account_id: number; display_name: string; avatar_url: string };
 type LoginCodeRow = { steam_id: string };
 type PenaltyRow = { cancel_penalties: number; cooldown_until: number };
+type MatchCacheRow = { match_json: string; source: string; parsed: number; expires_at: number };
+type ProviderStateRow = { blocked_until: number; reason: string };
+type MatchFetchResult = { match: JsonObject | null; status: 'ready' | 'parsing' | 'waiting_provider'; message: string; retryAfter: number; source?: string };
 type AttemptRow = {
   id: string; steam_id: string; mode: 'normal' | 'turbo'; order_required: number;
   status: 'rolling' | 'committed' | 'verified' | 'expired'; roll_count: number; seed: string;
   hero_id: number; hero_key: string; hero_name: string; items_json: string; modifier_id: string | null;
   rules_version: string; data_version: string; created_at: number; updated_at: number; committed_at: number | null;
-  cancel_penalties: number;
+  cancel_penalties: number; verification_retry_at: number;
 };
 
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
@@ -26,14 +30,19 @@ const ATTEMPT_SECONDS = 24 * 60 * 60;
 const CANCEL_COOLDOWN_SECONDS = 60;
 const CANCEL_PENALTY_ROLLS = 1;
 const MATCH_GUARD_SECONDS = { normal: 60, turbo: 60 } as const;
-const RULES_VERSION = '1.6.0';
+const MATCH_CACHE_SECONDS = 7 * 24 * 60 * 60;
+const UNPARSED_CACHE_SECONDS = 45;
+const PARSE_REQUEST_COOLDOWN_SECONDS = 5 * 60;
+const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
+const STRATZ_API = 'https://api.stratz.com/graphql';
+const RULES_VERSION = '1.6.1';
 
 class HttpError extends Error {
   constructor(
-    readonly status: number,
-    message: string,
-    readonly code = 'request_failed',
-    readonly details: JsonObject = {}
+      readonly status: number,
+      message: string,
+      readonly code = 'request_failed',
+      readonly details: JsonObject = {}
   ) {
     super(message);
   }
@@ -46,7 +55,7 @@ function isRecord(value: unknown): value is JsonObject {
 function isRankedPool(value: unknown): value is RankedPool {
   if (!isRecord(value) || typeof value.generatedAt !== 'string' || !Array.isArray(value.heroes) || !Array.isArray(value.items)) return false;
   return value.heroes.every(hero => isRecord(hero) && Number.isInteger(hero.id) && typeof hero.key === 'string')
-    && value.items.every(item => isRecord(item) && Number.isInteger(item.id) && typeof item.key === 'string' && typeof item.sourceKey === 'string');
+      && value.items.every(item => isRecord(item) && Number.isInteger(item.id) && typeof item.key === 'string' && typeof item.sourceKey === 'string');
 }
 
 async function readJson(request: Request): Promise<JsonObject> {
@@ -114,8 +123,8 @@ async function fetchSteamProfile(steamId: string, env: Env): Promise<{ displayNa
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
       const body: unknown = response.ok ? await response.json() : null;
       const player = isRecord(body) && isRecord(body.response) && Array.isArray(body.response.players)
-        ? body.response.players[0]
-        : null;
+          ? body.response.players[0]
+          : null;
       if (isRecord(player)) {
         return {
           displayName: cleanProfileText(player.personaname, fallback.displayName),
@@ -227,7 +236,8 @@ function challenge(row: AttemptRow) {
     eligibleAt: committedAt + matchGuardSeconds,
     expiresAt: row.created_at + ATTEMPT_SECONDS,
     matchGuardSeconds,
-    cancelCost: CANCEL_PENALTY_ROLLS
+    cancelCost: CANCEL_PENALTY_ROLLS,
+    verificationRetryAt: Number(row.verification_retry_at || 0)
   };
 }
 
@@ -237,7 +247,7 @@ async function handleSteamLogin(url: URL, env: Env): Promise<Response> {
   callback.searchParams.set('state', state);
   const expiresAt = nowSeconds() + 600;
   await env.DB.prepare('INSERT INTO oauth_states (state_hash, return_to, expires_at) VALUES (?, ?, ?)')
-    .bind(await hashToken(state), safeReturnTo(url.searchParams.get('return_to'), env), expiresAt).run();
+      .bind(await hashToken(state), safeReturnTo(url.searchParams.get('return_to'), env), expiresAt).run();
 
   const target = new URL(STEAM_OPENID);
   target.searchParams.set('openid.ns', 'http://specs.openid.net/auth/2.0');
@@ -252,7 +262,7 @@ async function handleSteamLogin(url: URL, env: Env): Promise<Response> {
 async function handleSteamCallback(request: Request, url: URL, env: Env): Promise<Response> {
   const state = url.searchParams.get('state') || '';
   const stateRow = await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash = ? AND expires_at > ? RETURNING return_to')
-    .bind(await hashToken(state), nowSeconds()).first<{ return_to: string }>();
+      .bind(await hashToken(state), nowSeconds()).first<{ return_to: string }>();
   if (!stateRow) throw new HttpError(400, 'Steam login устарел или уже использован.', 'invalid_state');
 
   const verification = new URLSearchParams();
@@ -279,11 +289,11 @@ async function handleSteamCallback(request: Request, url: URL, env: Env): Promis
   const profile = await fetchSteamProfile(steamId, env);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO users (steam_id, account_id, display_name, avatar_url, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(steam_id) DO UPDATE SET account_id = excluded.account_id,
-      display_name = excluded.display_name, avatar_url = excluded.avatar_url, updated_at = excluded.updated_at`)
-      .bind(steamId, Number(accountIdBig), profile.displayName, profile.avatarUrl, now, now),
+                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(steam_id) DO UPDATE SET account_id = excluded.account_id,
+                                                                                  display_name = excluded.display_name, avatar_url = excluded.avatar_url, updated_at = excluded.updated_at`)
+        .bind(steamId, Number(accountIdBig), profile.displayName, profile.avatarUrl, now, now),
     env.DB.prepare('INSERT INTO login_codes (code_hash, steam_id, expires_at) VALUES (?, ?, ?)')
-      .bind(await hashToken(code), steamId, now + 300)
+        .bind(await hashToken(code), steamId, now + 300)
   ]);
   const returnUrl = new URL(stateRow.return_to);
   returnUrl.searchParams.set('steam_code', code);
@@ -294,15 +304,15 @@ async function handleExchange(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const code = typeof body.code === 'string' ? body.code : '';
   const login = await env.DB.prepare('DELETE FROM login_codes WHERE code_hash = ? AND expires_at > ? RETURNING steam_id')
-    .bind(await hashToken(code), nowSeconds()).first<LoginCodeRow>();
+      .bind(await hashToken(code), nowSeconds()).first<LoginCodeRow>();
   if (!login) throw new HttpError(400, 'Код входа устарел или уже использован.', 'invalid_login_code');
 
   const token = randomToken();
   const now = nowSeconds();
   await env.DB.prepare('INSERT INTO sessions (token_hash, steam_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-    .bind(await hashToken(token), login.steam_id, now + SESSION_SECONDS, now).run();
+      .bind(await hashToken(token), login.steam_id, now + SESSION_SECONDS, now).run();
   const user = await env.DB.prepare('SELECT steam_id, account_id, display_name, avatar_url FROM users WHERE steam_id = ?')
-    .bind(login.steam_id).first<UserRow>();
+      .bind(login.steam_id).first<UserRow>();
   return json({ token, user }, 200, env);
 }
 
@@ -315,38 +325,266 @@ async function getAttempt(id: string, steamId: string, env: Env): Promise<Attemp
 
 async function getPenalty(steamId: string, mode: 'normal' | 'turbo', env: Env): Promise<PenaltyRow> {
   return await env.DB.prepare('SELECT cancel_penalties, cooldown_until FROM ranked_penalties WHERE steam_id = ? AND mode = ?')
-    .bind(steamId, mode).first<PenaltyRow>() || { cancel_penalties: 0, cooldown_until: 0 };
+      .bind(steamId, mode).first<PenaltyRow>() || { cancel_penalties: 0, cooldown_until: 0 };
 }
 
-async function requestOpenDotaParse(matchId: string, env: Env): Promise<void> {
+function isParsedMatch(match: JsonObject): boolean {
+  if (isRecord(match.od_data) && match.od_data.has_parsed === true) return true;
+  return Array.isArray(match.players) && match.players.some(player => isRecord(player) && Array.isArray(player.purchase_log));
+}
+
+async function getCachedMatch(matchId: string, env: Env): Promise<{ match: JsonObject; source: string; parsed: boolean } | null> {
+  const row = await env.DB.prepare(`SELECT match_json, source, parsed, expires_at FROM match_cache
+                                    WHERE match_id = ? AND expires_at > ?`).bind(matchId, nowSeconds()).first<MatchCacheRow>();
+  if (!row) return null;
+  try {
+    const match: unknown = JSON.parse(row.match_json);
+    return isRecord(match) ? { match, source: row.source, parsed: row.parsed === 1 } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function cacheMatch(matchId: string, source: string, match: JsonObject, parsed: boolean, env: Env): Promise<void> {
+  const now = nowSeconds();
+  const ttl = parsed ? MATCH_CACHE_SECONDS : UNPARSED_CACHE_SECONDS;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO match_cache (match_id, source, match_json, parsed, fetched_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET source = excluded.source,
+                                                                                  match_json = excluded.match_json, parsed = excluded.parsed, fetched_at = excluded.fetched_at, expires_at = excluded.expires_at`)
+        .bind(matchId, source, JSON.stringify(match), parsed ? 1 : 0, now, now + ttl),
+    env.DB.prepare('DELETE FROM match_cache WHERE expires_at <= ?').bind(now),
+    env.DB.prepare('DELETE FROM match_requests WHERE updated_at <= ?').bind(now - MATCH_CACHE_SECONDS)
+  ]);
+}
+
+async function getProviderState(provider: string, env: Env): Promise<ProviderStateRow | null> {
+  return env.DB.prepare('SELECT blocked_until, reason FROM provider_state WHERE provider = ? AND blocked_until > ?')
+      .bind(provider, nowSeconds()).first<ProviderStateRow>();
+}
+
+async function blockProvider(provider: string, blockedUntil: number, reason: string, env: Env): Promise<void> {
+  await env.DB.prepare(`INSERT INTO provider_state (provider, blocked_until, reason, updated_at) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(provider) DO UPDATE SET blocked_until = MAX(provider_state.blocked_until, excluded.blocked_until),
+                                                            reason = excluded.reason, updated_at = excluded.updated_at`)
+      .bind(provider, blockedUntil, reason, nowSeconds()).run();
+}
+
+async function claimVerificationRequest(attemptId: string, steamId: string, env: Env): Promise<void> {
+  const now = nowSeconds();
+  const retryAt = now + VERIFICATION_REQUEST_COOLDOWN_SECONDS;
+  const claimed = await env.DB.prepare(`UPDATE attempts SET verification_retry_at = ?
+                                        WHERE id = ? AND steam_id = ? AND status = 'committed' AND verification_retry_at <= ?`)
+      .bind(retryAt, attemptId, steamId, now).run();
+  if (claimed.meta.changes === 1) return;
+
+  const row = await env.DB.prepare('SELECT verification_retry_at FROM attempts WHERE id = ? AND steam_id = ?')
+      .bind(attemptId, steamId).first<{ verification_retry_at: number }>();
+  const retryAfter = Math.max(1, Number(row?.verification_retry_at || retryAt) - now);
+  throw new HttpError(429, `Повторная проверка будет доступна через ${retryAfter} сек.`, 'verification_cooldown', { retryAfter });
+}
+
+async function setVerificationCooldown(attemptId: string, seconds: number, env: Env): Promise<void> {
+  const bounded = Math.max(1, Math.min(24 * 60 * 60, Math.ceil(Number(seconds) || VERIFICATION_REQUEST_COOLDOWN_SECONDS)));
+  await env.DB.prepare(`UPDATE attempts SET verification_retry_at = MAX(verification_retry_at, ?)
+                        WHERE id = ? AND status = 'committed'`)
+      .bind(nowSeconds() + bounded, attemptId).run();
+}
+
+async function claimParseRequest(matchId: string, env: Env): Promise<boolean> {
+  const now = nowSeconds();
+  const claimed = await env.DB.prepare(`INSERT INTO match_requests (match_id, parse_requested_at, updated_at)
+                                        VALUES (?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET parse_requested_at = excluded.parse_requested_at,
+                                                                                             updated_at = excluded.updated_at WHERE match_requests.parse_requested_at <= ? RETURNING match_id`)
+      .bind(matchId, now, now, now - PARSE_REQUEST_COOLDOWN_SECONDS).first<{ match_id: string }>();
+  return Boolean(claimed);
+}
+
+async function requestOpenDotaParse(matchId: string, env: Env): Promise<{ requested: boolean; retryAfter: number }> {
+  const claimed = await claimParseRequest(matchId, env);
+  if (!claimed) return { requested: false, retryAfter: 60 };
+
   let response: Response;
   try {
     response = await fetch(`${env.OPENDOTA_API}/request/${matchId}`, { method: 'POST', headers: { Accept: 'application/json' } });
   } catch {
-    throw new HttpError(502, 'Не удалось отправить матч на разбор OpenDota. Попробуйте позже.', 'opendota_unreachable');
+    return { requested: false, retryAfter: 90 };
   }
-  if (response.status === 429) throw new HttpError(429, 'OpenDota временно ограничила запросы. Попробуйте через несколько минут.', 'opendota_rate_limited');
-  if (!response.ok && response.status !== 409) {
-    throw new HttpError(502, 'OpenDota не приняла запрос на разбор матча.', 'parse_request_failed');
+  if (response.status === 429) {
+    const upstreamBody = await response.text().catch(() => '');
+    const limit = openDotaRateLimit(upstreamBody, { retryAfter: response.headers.get('retry-after') }, nowSeconds());
+    await blockProvider('opendota', limit.blockedUntil, limit.kind, env);
+    console.warn('OpenDota parse rate limit:', {
+      body: upstreamBody,
+      remainingMinute: response.headers.get('x-rate-limit-remaining-minute'),
+      remainingDay: response.headers.get('x-rate-limit-remaining-day'),
+      upstreamIp: response.headers.get('x-ip-address'),
+      retryAfter: limit.retryAfter
+    });
+    return { requested: false, retryAfter: limit.retryAfter };
   }
+  if (!response.ok && response.status !== 409) return { requested: false, retryAfter: 90 };
+  return { requested: true, retryAfter: 60 };
+}
+
+const STRATZ_MATCH_QUERY = `
+  query RankedMatch($id: Long!) {
+    match(id: $id) {
+      id didRadiantWin durationSeconds startDateTime lobbyType gameMode radiantKills direKills
+      playbackData { runeEvents { fromPlayer } }
+      players {
+        steamAccountId playerSlot isVictory heroId kills deaths assists leaverStatus towerDamage
+        item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
+        stats {
+          itemPurchases { itemId time }
+          itemUsed { itemId count }
+          wards { type }
+          campStack
+        }
+        playbackData { buyBackEvents { time } }
+      }
+    }
+  }
+`;
+
+async function fetchStratzMatch(matchId: string, env: Env): Promise<JsonObject | null> {
+  const token = String((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN || '').trim();
+  if (!token) return null;
+
+  let response: Response;
+  try {
+    response = await fetch(STRATZ_API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/graphql-response+json, application/json'
+      },
+      body: JSON.stringify({ query: STRATZ_MATCH_QUERY, variables: { id: Number(matchId) } })
+    });
+  } catch (error) {
+    console.warn('STRATZ request failed:', error);
+    return null;
+  }
+  if (!response.ok) {
+    console.warn('STRATZ returned non-OK:', response.status, await response.text().catch(() => ''));
+    return null;
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (!isRecord(payload)) return null;
+  if (Array.isArray(payload.errors) && payload.errors.length) {
+    console.warn('STRATZ GraphQL errors:', JSON.stringify(payload.errors).slice(0, 1000));
+  }
+  const normalized: unknown = normalizeStratzMatch(payload);
+  return isRecord(normalized) ? normalized : null;
 }
 
 async function fetchOpenDotaMatch(matchId: string, env: Env): Promise<JsonObject | null> {
+  const blocked = await getProviderState('opendota', env);
+  if (blocked) {
+    throw new HttpError(429, 'OpenDota временно пропускается после ограничения запросов.', 'opendota_rate_limited', {
+      retryAfter: Math.max(1, blocked.blocked_until - nowSeconds()), reason: blocked.reason
+    });
+  }
+
   let response: Response;
   try {
     response = await fetch(`${env.OPENDOTA_API}/matches/${matchId}`, { headers: { Accept: 'application/json' } });
   } catch {
-    throw new HttpError(502, 'OpenDota сейчас недоступна. Попробуйте подтвердить матч позже.', 'opendota_unreachable');
+    throw new HttpError(502, 'OpenDota сейчас недоступна.', 'opendota_unreachable');
   }
-  if (response.status === 404) {
-    await requestOpenDotaParse(matchId, env);
-    return null;
+  if (response.status === 404) return null;
+  if (response.status === 429) {
+    const upstreamBody = await response.text().catch(() => '');
+    const limit = openDotaRateLimit(upstreamBody, { retryAfter: response.headers.get('retry-after') }, nowSeconds());
+    await blockProvider('opendota', limit.blockedUntil, limit.kind, env);
+    console.warn('OpenDota rate limit:', {
+      endpoint: response.url,
+      body: upstreamBody,
+      remainingMinute: response.headers.get('x-rate-limit-remaining-minute'),
+      remainingDay: response.headers.get('x-rate-limit-remaining-day'),
+      upstreamIp: response.headers.get('x-ip-address'),
+      retryAfter: limit.retryAfter
+    });
+    throw new HttpError(429, limit.message, 'opendota_rate_limited', { retryAfter: limit.retryAfter, reason: limit.kind });
   }
-  if (response.status === 429) throw new HttpError(429, 'OpenDota временно ограничила запросы. Попробуйте через несколько минут.', 'opendota_rate_limited');
   if (!response.ok) throw new HttpError(502, 'OpenDota временно не вернула данные матча.', 'match_unavailable');
   const match: unknown = await response.json().catch(() => null);
   if (!isRecord(match)) throw new HttpError(502, 'OpenDota вернула неверный ответ.', 'invalid_match');
   return match;
+}
+
+async function fetchRankedMatch(matchId: string, env: Env): Promise<MatchFetchResult> {
+  const cached = await getCachedMatch(matchId, env);
+  if (cached) {
+    return {
+      match: cached.match,
+      status: 'ready',
+      message: cached.parsed ? 'Матч загружен из серверного кэша.' : 'Основные данные матча загружены из серверного кэша.',
+      retryAfter: 0,
+      source: cached.source
+    };
+  }
+
+  let openDotaError: HttpError | null = null;
+  try {
+    const match = await fetchOpenDotaMatch(matchId, env);
+    if (match) {
+      const parsed = isParsedMatch(match);
+      await cacheMatch(matchId, 'opendota', match, parsed, env);
+      return {
+        match,
+        status: 'ready',
+        message: parsed ? 'Матч получен из OpenDota.' : 'OpenDota вернула основные данные матча.',
+        retryAfter: 0,
+        source: 'opendota'
+      };
+    }
+  } catch (error) {
+    if (error instanceof HttpError && ['opendota_rate_limited', 'opendota_unreachable', 'match_unavailable'].includes(error.code)) {
+      openDotaError = error;
+    } else {
+      throw error;
+    }
+  }
+
+  const stratzMatch = await fetchStratzMatch(matchId, env);
+  if (stratzMatch) {
+    const parsed = isParsedMatch(stratzMatch);
+    await cacheMatch(matchId, 'stratz', stratzMatch, parsed, env);
+    return {
+      match: stratzMatch,
+      status: 'ready',
+      message: openDotaError
+          ? 'OpenDota недоступна — матч получен через бесплатный резерв STRATZ.'
+          : 'Матч найден через бесплатный резерв STRATZ.',
+      retryAfter: 0,
+      source: 'stratz'
+    };
+  }
+
+  if (!openDotaError) {
+    const parse = await requestOpenDotaParse(matchId, env);
+    return {
+      match: null,
+      status: 'parsing',
+      message: parse.requested
+          ? 'Матч один раз отправлен на разбор OpenDota. Повторный запрос временно заблокирован, чтобы не тратить лимит.'
+          : 'Матч уже ожидает разбора OpenDota. Повторите проверку позже.',
+      retryAfter: parse.retryAfter
+    };
+  }
+
+  const hasStratz = Boolean((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN);
+  const retryAfter = hasStratz ? 60 : Number(openDotaError.details.retryAfter || 90);
+  return {
+    match: null,
+    status: 'waiting_provider',
+    message: hasStratz
+        ? 'OpenDota ограничила запросы, а STRATZ пока не вернула матч. Попытка сохранена.'
+        : 'OpenDota ограничила запросы. Попытка сохранена; можно повторить позже или подключить бесплатный STRATZ token.',
+    retryAfter
+  };
 }
 
 async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -356,11 +594,11 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
   const orderRequired = body.orderRequired === true;
   const now = nowSeconds();
   let active = await env.DB.prepare(`SELECT * FROM attempts
-    WHERE steam_id = ? AND status IN ('rolling', 'committed') AND created_at > ? ORDER BY created_at DESC LIMIT 1`)
-    .bind(user.steam_id, now - ATTEMPT_SECONDS).first<AttemptRow>();
+                                     WHERE steam_id = ? AND status IN ('rolling', 'committed') AND created_at > ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(user.steam_id, now - ATTEMPT_SECONDS).first<AttemptRow>();
   if (active?.status === 'rolling') {
     await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
-      .bind(now, now, active.id).run();
+        .bind(now, now, active.id).run();
     active = await getAttempt(active.id, user.steam_id, env);
   }
   if (active) return json({ error: 'Сначала завершите или отмените текущую попытку.', code: 'active_attempt', attempt: challenge(active) }, 409, env);
@@ -380,8 +618,8 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
     (id, steam_id, mode, order_required, status, roll_count, cancel_penalties, seed, hero_id, hero_key, hero_name, items_json,
      modifier_id, rules_version, data_version, created_at, updated_at, committed_at)
     VALUES (?, ?, ?, ?, 'committed', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, user.steam_id, mode, orderRequired ? 1 : 0, penalty.cancel_penalties, roll.seed, roll.hero.id, roll.hero.key, roll.hero.name,
-      JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt, now, now, now).run();
+      .bind(id, user.steam_id, mode, orderRequired ? 1 : 0, penalty.cancel_penalties, roll.seed, roll.hero.id, roll.hero.key, roll.hero.name,
+          JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt, now, now, now).run();
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 201, env);
 }
 
@@ -393,10 +631,10 @@ async function handleReroll(id: string, request: Request, env: Env, ctx: Executi
   const roll = createRoll(pool, current.mode, current.order_required === 1);
   const now = nowSeconds();
   const result = await env.DB.prepare(`UPDATE attempts SET roll_count = roll_count + 1, seed = ?, hero_id = ?, hero_key = ?,
-    hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, committed_at = ?, updated_at = ?
+    hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, committed_at = ?, verification_retry_at = 0, updated_at = ?
     WHERE id = ? AND status = 'committed' AND roll_count = ?`)
-    .bind(roll.seed, roll.hero.id, roll.hero.key, roll.hero.name, JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt,
-      now, now, id, current.roll_count).run();
+      .bind(roll.seed, roll.hero.id, roll.hero.key, roll.hero.name, JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt,
+          now, now, id, current.roll_count).run();
   if (result.meta.changes !== 1) throw new HttpError(409, 'Сборка уже была изменена в другой вкладке.', 'reroll_conflict');
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 200, env);
 }
@@ -420,13 +658,13 @@ async function handleCancel(id: string, request: Request, env: Env): Promise<Res
   const cooldownUntil = now + CANCEL_COOLDOWN_SECONDS;
   const cancelled = await env.DB.prepare(`UPDATE attempts SET status = 'expired', updated_at = ?
     WHERE id = ? AND steam_id = ? AND status IN ('rolling', 'committed') RETURNING mode`)
-    .bind(now, id, user.steam_id).first<{ mode: 'normal' | 'turbo' }>();
+      .bind(now, id, user.steam_id).first<{ mode: 'normal' | 'turbo' }>();
   if (!cancelled) throw new HttpError(409, 'Попытка уже изменилась в другой вкладке.', 'cancel_conflict');
   await env.DB.prepare(`INSERT INTO ranked_penalties (steam_id, mode, cancel_penalties, cooldown_until, updated_at)
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(steam_id, mode) DO UPDATE SET
     cancel_penalties = ranked_penalties.cancel_penalties + excluded.cancel_penalties,
     cooldown_until = MAX(ranked_penalties.cooldown_until, excluded.cooldown_until), updated_at = excluded.updated_at`)
-    .bind(user.steam_id, cancelled.mode, CANCEL_PENALTY_ROLLS, cooldownUntil, now).run();
+      .bind(user.steam_id, cancelled.mode, CANCEL_PENALTY_ROLLS, cooldownUntil, now).run();
   const penalty = await getPenalty(user.steam_id, current.mode, env);
   return json({ status: 'cancelled', cancelPenalties: penalty.cancel_penalties, cooldownUntil }, 200, env);
 }
@@ -439,23 +677,51 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
   const matchId = typeof body.matchId === 'string' ? body.matchId.trim() : String(body.matchId || '');
   if (!/^\d{8,12}$/.test(matchId)) throw new HttpError(400, 'Введите корректный match ID.', 'invalid_match_id');
 
-  const match = await fetchOpenDotaMatch(matchId, env);
-  if (!match) return json({ status: 'parsing', message: 'Матч отправлен на разбор OpenDota.' }, 202, env);
-  const proof = verifyMatch({
-    match,
-    attempt: {
-      ...attempt,
-      items: JSON.parse(attempt.items_json),
-      match_guard_seconds: MATCH_GUARD_SECONDS[attempt.mode]
-    },
-    accountId: user.account_id
-  });
+  await claimVerificationRequest(attempt.id, user.steam_id, env);
+
+  let fetched = await fetchRankedMatch(matchId, env);
+  if (!fetched.match) {
+    await setVerificationCooldown(attempt.id, fetched.retryAfter, env);
+    return json({ status: fetched.status, message: fetched.message, retryAfter: fetched.retryAfter }, 202, env);
+  }
+
+  const verificationAttempt = {
+    ...attempt,
+    items: JSON.parse(attempt.items_json),
+    match_guard_seconds: MATCH_GUARD_SECONDS[attempt.mode]
+  };
+  let proof = verifyMatch({ match: fetched.match, attempt: verificationAttempt, accountId: user.account_id });
+
+  // OpenDota often exposes the result immediately but adds purchase history later.
+  // Only ask STRATZ for the heavier parsed payload after the basic hero/win/time checks pass.
+  if (!proof.parsed && fetched.source !== 'stratz') {
+    const stratzMatch = await fetchStratzMatch(matchId, env);
+    if (stratzMatch) {
+      const parsed = isParsedMatch(stratzMatch);
+      await cacheMatch(matchId, 'stratz', stratzMatch, parsed, env);
+      if (parsed) {
+        fetched = { match: stratzMatch, status: 'ready', message: 'Матч дополнен через STRATZ.', retryAfter: 0, source: 'stratz' };
+        proof = verifyMatch({ match: stratzMatch, attempt: verificationAttempt, accountId: user.account_id });
+      }
+    }
+  }
+
   if (!proof.parsed) {
-    await requestOpenDotaParse(matchId, env);
-    return json({ status: 'parsing', message: 'OpenDota разбирает реплей.', errors: proof.errors }, 202, env);
+    const parse = await requestOpenDotaParse(matchId, env);
+    await setVerificationCooldown(attempt.id, parse.retryAfter, env);
+    return json({
+      status: 'parsing',
+      message: 'Основные данные матча подтверждены, но журнал покупок ещё обрабатывается.',
+      retryAfter: parse.retryAfter,
+      errors: proof.errors
+    }, 202, env);
   }
   if (!proof.ok) {
-    return json({ error: proof.errors.join(' '), code: 'verification_failed', status: 'rejected', errors: proof.errors }, 422, env);
+    await setVerificationCooldown(attempt.id, VERIFICATION_REQUEST_COOLDOWN_SECONDS, env);
+    return json({
+      error: proof.errors.join(' '), code: 'verification_failed', status: 'rejected', errors: proof.errors,
+      retryAfter: VERIFICATION_REQUEST_COOLDOWN_SECONDS
+    }, 422, env);
   }
 
   const modifier = modifierById(attempt.modifier_id);
@@ -472,13 +738,13 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
       env.DB.prepare(`INSERT INTO submissions
         (id, attempt_id, steam_id, match_id, score, rerolls, cancel_penalties, order_required, mode, modifier_id, evidence_json, verified_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(crypto.randomUUID(), attempt.id, user.steam_id, matchId, score, attempt.roll_count, cancelPenalties, attempt.order_required,
-          attempt.mode, attempt.modifier_id, JSON.stringify(proof.evidence), now),
+          .bind(crypto.randomUUID(), attempt.id, user.steam_id, matchId, score, attempt.roll_count, cancelPenalties, attempt.order_required,
+              attempt.mode, attempt.modifier_id, JSON.stringify({ ...proof.evidence, source: fetched.source || 'unknown' }), now),
       env.DB.prepare("UPDATE attempts SET status = 'verified', updated_at = ? WHERE id = ? AND status = 'committed'")
-        .bind(now, attempt.id),
+          .bind(now, attempt.id),
       env.DB.prepare(`INSERT INTO ranked_penalties (steam_id, mode, cancel_penalties, cooldown_until, updated_at)
         VALUES (?, ?, 0, 0, ?) ON CONFLICT(steam_id, mode) DO UPDATE SET cancel_penalties = 0, cooldown_until = 0, updated_at = excluded.updated_at`)
-        .bind(user.steam_id, attempt.mode, now)
+          .bind(user.steam_id, attempt.mode, now)
     ]);
   } catch (error) {
     if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
@@ -486,7 +752,7 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
     }
     throw error;
   }
-  return json({ status: 'verified', score, evidence: proof.evidence }, 200, env);
+  return json({ status: 'verified', score, source: fetched.source, evidence: proof.evidence }, 200, env);
 }
 
 async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
@@ -513,7 +779,9 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   const url = new URL(request.url);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(env) });
   if (request.method === 'GET' && url.pathname === '/health') return json({
-    ok: true, rulesVersion: RULES_VERSION, cancelPenalty: CANCEL_PENALTY_ROLLS, matchGuardSeconds: MATCH_GUARD_SECONDS
+    ok: true, rulesVersion: RULES_VERSION, cancelPenalty: CANCEL_PENALTY_ROLLS, matchGuardSeconds: MATCH_GUARD_SECONDS,
+    verificationCooldownSeconds: VERIFICATION_REQUEST_COOLDOWN_SECONDS,
+    providers: { openDota: true, stratzFallback: Boolean((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN) }
   }, 200, env);
   if (request.method === 'GET' && url.pathname === '/auth/steam') return handleSteamLogin(url, env);
   if (request.method === 'GET' && url.pathname === '/auth/steam/callback') return handleSteamCallback(request, url, env);
@@ -527,7 +795,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     if (active?.status === 'rolling') {
       const now = nowSeconds();
       await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
-        .bind(now, now, active.id).run();
+          .bind(now, now, active.id).run();
       active = await getAttempt(active.id, user.steam_id, env);
     }
     return json({ attempt: active ? challenge(active) : null }, 200, env);

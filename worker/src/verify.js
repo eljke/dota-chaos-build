@@ -4,7 +4,28 @@ const NORMAL_GAME_MODES = new Set([1, 2, 3, 4, 5, 12, 16, 17, 22]);
 const PUBLIC_LOBBIES = new Set([0, 5, 6, 7, 9]);
 
 function firstPurchaseIndex(purchaseLog, item) {
-  return purchaseLog.findIndex(entry => entry?.key === item.key || entry?.key === item.sourceKey);
+  return purchaseLog.findIndex(entry =>
+    entry?.key === item.key
+    || entry?.key === item.sourceKey
+    || Number(entry?.id ?? entry?.item_id) === Number(item.id)
+  );
+}
+
+function countById(record, id) {
+  return Number(record?.[id] ?? record?.[String(id)] ?? 0);
+}
+
+function purchaseCount(player, key, id) {
+  const named = Number(player.purchase?.[key] || 0);
+  if (named > 0) return named;
+  const byId = countById(player.purchase_by_id, id);
+  if (byId > 0) return byId;
+  return (Array.isArray(player.purchase_log) ? player.purchase_log : [])
+    .filter(entry => entry?.key === key || Number(entry?.id ?? entry?.item_id) === Number(id)).length;
+}
+
+function useCount(player, key, id) {
+  return Number(player.item_uses?.[key] || 0) || countById(player.item_uses_by_id, id);
 }
 
 export function calculateScore({ rerolls, cancelPenalties = 0, orderRequired, modifierMultiplier = 1 }) {
@@ -36,20 +57,20 @@ export function verifyModifier({ modifierId, match, player, attempt }) {
     case 'camp-stacker': value = Number(player.camps_stacked || 0); ok = value >= (turbo ? 2 : 3); break;
     case 'vision': value = Number(player.obs_placed || 0) + Number(player.sen_placed || 0); ok = value >= (turbo ? 6 : 8); break;
     case 'smoke-operation': {
-      value = { purchased: Number(purchases.smoke_of_deceit || 0), used: Number(uses.smoke_of_deceit || 0) };
+      value = { purchased: purchaseCount(player, 'smoke_of_deceit', 188), used: useCount(player, 'smoke_of_deceit', 188) };
       const target = turbo ? 1 : 2;
       ok = value.purchased >= target && value.used >= target;
       break;
     }
     case 'aghanim-early': {
-      const aghanim = log.findIndex(entry => entry?.key === 'ultimate_scepter');
+      const aghanim = log.findIndex(entry => entry?.key === 'ultimate_scepter' || Number(entry?.id ?? entry?.item_id) === 108);
       const thirdItem = firstPurchaseIndex(log, attempt.items[2]);
       value = { aghanim, thirdItem };
       ok = aghanim >= 0 && thirdItem >= 0 && aghanim < thirdItem;
       break;
     }
     case 'shard-before-luxury': {
-      const shard = log.findIndex(entry => entry?.key === 'aghanims_shard');
+      const shard = log.findIndex(entry => entry?.key === 'aghanims_shard' || Number(entry?.id ?? entry?.item_id) === 609);
       const luxury = Math.min(...attempt.items.filter(item => Number(item.cost) >= 5000).map(item => firstPurchaseIndex(log, item)).filter(index => index >= 0));
       value = { shard, firstLuxury: luxury };
       ok = shard >= 0 && Number.isFinite(luxury) && shard < luxury;
@@ -66,7 +87,6 @@ export function verifyMatch({ match, attempt, accountId }) {
   const player = players.find(candidate => Number(candidate?.account_id) === Number(accountId));
 
   if (!player) return { ok: false, parsed: true, errors: ['В матче не найден авторизованный Steam-аккаунт.'] };
-  if (!Array.isArray(player.purchase_log)) return { ok: false, parsed: false, errors: ['Матч ещё не распарсен OpenDota.'] };
 
   if (!PUBLIC_LOBBIES.has(Number(match.lobby_type))) errors.push('Допускаются только публичные матчи без ботов.');
   const isTurbo = Number(match.game_mode) === 23;
@@ -83,6 +103,22 @@ export function verifyMatch({ match, attempt, accountId }) {
     errors.push(`Матч начался слишком рано: ranked-сборка должна быть выдана минимум за ${Math.ceil(guardSeconds / 60)} мин. до старта.`);
   }
 
+  const basicEvidence = {
+    heroId: Number(player.hero_id),
+    duration: Number(match.duration),
+    gameMode: Number(match.game_mode),
+    lobbyType: Number(match.lobby_type),
+    committedAt: Number(attempt.committed_at),
+    eligibleAfter
+  };
+
+  // Basic match data is enough to reject a wrong hero, loss or invalid start time.
+  // Do not spend a replay-parse request on a match that can never pass verification.
+  if (errors.length) return { ok: false, parsed: true, errors, player, evidence: basicEvidence };
+  if (!Array.isArray(player.purchase_log)) {
+    return { ok: false, parsed: false, errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
+  }
+
   const purchaseLog = player.purchase_log;
   const purchaseIndices = attempt.items.map(item => firstPurchaseIndex(purchaseLog, item));
   const finalIds = [
@@ -96,8 +132,9 @@ export function verifyMatch({ match, attempt, accountId }) {
   });
 
   const purchases = new Set(purchaseLog.map(entry => entry?.key));
-  if (!purchases.has('ultimate_scepter')) errors.push("Не подтверждена покупка Aghanim's Scepter.");
-  if (!purchases.has('aghanims_shard')) errors.push("Не подтверждена покупка Aghanim's Shard.");
+  const purchaseIds = new Set(purchaseLog.map(entry => Number(entry?.id ?? entry?.item_id)));
+  if (!purchases.has('ultimate_scepter') && !purchaseIds.has(108)) errors.push("Не подтверждена покупка Aghanim's Scepter.");
+  if (!purchases.has('aghanims_shard') && !purchaseIds.has(609)) errors.push("Не подтверждена покупка Aghanim's Shard.");
 
   if (attempt.order_required && purchaseIndices.some((value, index) => index > 0 && value <= purchaseIndices[index - 1])) {
     errors.push('Предметы завершены не в выданном порядке.');
@@ -112,14 +149,9 @@ export function verifyMatch({ match, attempt, accountId }) {
     errors,
     player,
     evidence: {
-      heroId: Number(player.hero_id),
+      ...basicEvidence,
       purchaseIndices,
       finalItemIds: finalIds,
-      duration: Number(match.duration),
-      gameMode: Number(match.game_mode),
-      lobbyType: Number(match.lobby_type),
-      committedAt: Number(attempt.committed_at),
-      eligibleAfter,
       modifier: modifierProof.evidence
     }
   };

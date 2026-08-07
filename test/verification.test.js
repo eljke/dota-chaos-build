@@ -46,6 +46,16 @@ test('unparsed match asks for replay parsing', () => {
   assert.equal(verifyMatch({ match: unparsed, attempt, accountId: 42 }).parsed, false);
 });
 
+test('unparsed wrong match is rejected without requesting replay data', () => {
+  const unparsedWrong = structuredClone(match);
+  delete unparsedWrong.players[0].purchase_log;
+  unparsedWrong.players[0].hero_id = 99;
+  const result = verifyMatch({ match: unparsedWrong, attempt, accountId: 42 });
+  assert.equal(result.parsed, true);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(error => error.includes('не выданный герой')));
+});
+
 test('match verification rejects a failed assigned modifier', () => {
   const challenged = { ...attempt, modifier_id: 'tower-pressure' };
   const result = verifyMatch({ match, attempt: challenged, accountId: 42 });

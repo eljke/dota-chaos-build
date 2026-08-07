@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.6.0">
+  <link rel="stylesheet" href="styles.css?v=1.6.1">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -322,6 +322,15 @@
     </div>
     <div class="release-notes">
       <article>
+        <header><h3>1.6.1</h3><time datetime="2026-08-07">7 августа 2026</time></header>
+        <ul>
+          <li>Добавили серверный кэш матчей и защиту от повторных запросов разбора, чтобы экономить бесплатный лимит OpenDota.</li>
+          <li>При ограничении OpenDota Worker может переключиться на бесплатный резерв STRATZ.</li>
+          <li>Кнопка подтверждения получила серверный кулдаун: повторные клики и несколько вкладок не спамят внешние API.</li>
+          <li>Неверный герой, поражение и слишком ранний старт отклоняются до дорогого разбора реплея; покупки проверяются через OpenDota или STRATZ.</li>
+        </ul>
+      </article>
+      <article>
         <header><h3>1.6.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Вынесли ranked в отдельную вкладку с собственной карточкой героя и предметов — обычные замки слотов туда больше не попадают.</li>
@@ -373,6 +382,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.6.0"></script>
+  <script type="module" src="app.js?v=1.6.1"></script>
 </body>
 </html>
