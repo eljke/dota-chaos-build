@@ -3,6 +3,7 @@ import { BOOT_KEYS, isItemCompatible } from '../../js/item-rules.js';
 import { eligibleModifiers, modifierById } from '../../js/modifiers.js';
 import { calculateScore, verifyMatch } from './verify.js';
 import { verifyVerificationSignature } from './verification-auth.js';
+import { normalizeStratzMatch } from './providers.js';
 
 type JsonObject = Record<string, unknown>;
 type RankedItem = { id: number; key: string; sourceKey: string; name: string; cost: number; upgradeIds?: number[]; upgradeKeys?: string[] };
@@ -27,6 +28,7 @@ type AttemptRow = {
 
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
 const STEAM_PLAYER_SUMMARIES = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/';
+const STRATZ_API = 'https://api.stratz.com/graphql';
 const STEAM_ID_BASE = 76561197960265728n;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ATTEMPT_SECONDS = 24 * 60 * 60;
@@ -38,6 +40,26 @@ const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const RULES_VERSION = '1.7.0';
+
+const STRATZ_MATCH_QUERY = `
+  query RankedMatch($id: Long!) {
+    match(id: $id) {
+      id didRadiantWin durationSeconds startDateTime lobbyType gameMode radiantKills direKills
+      playbackData { runeEvents { fromPlayer } }
+      players {
+        steamAccountId playerSlot isVictory heroId kills deaths assists leaverStatus towerDamage
+        item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
+        stats {
+          itemPurchases { itemId time }
+          itemUsed { itemId count }
+          wards { type }
+          campStack
+        }
+        playbackData { buyBackEvents { time } }
+      }
+    }
+  }
+`;
 
 class HttpError extends Error {
   constructor(
@@ -498,17 +520,95 @@ async function readCallbackBody(request: Request): Promise<{ raw: string; value:
   return { raw, value: parsed };
 }
 
-async function handleVerificationCallback(request: Request, env: Env): Promise<Response> {
-  const { raw, value } = await readCallbackBody(request);
+async function verifyInternalRequest(request: Request, raw: string, env: Env): Promise<void> {
   const timestamp = String(request.headers.get('x-verification-timestamp') || '');
   const signature = String(request.headers.get('x-verification-signature') || '');
   const timestampNumber = Number(timestamp);
   if (!Number.isFinite(timestampNumber) || Math.abs(nowSeconds() - timestampNumber) > VERIFICATION_CALLBACK_MAX_AGE_SECONDS) {
-    throw new HttpError(401, 'Callback устарел.', 'invalid_callback_timestamp');
+    throw new HttpError(401, 'Внутренний запрос устарел.', 'invalid_callback_timestamp');
   }
   if (!await verifyVerificationSignature(callbackSecret(env), timestamp, raw, signature)) {
-    throw new HttpError(401, 'Неверная подпись callback.', 'invalid_callback_signature');
+    throw new HttpError(401, 'Неверная подпись внутреннего запроса.', 'invalid_callback_signature');
   }
+}
+
+async function handleStratzMatch(request: Request, env: Env): Promise<Response> {
+  const { raw, value } = await readCallbackBody(request);
+  await verifyInternalRequest(request, raw, env);
+
+  const jobId = typeof value.jobId === 'string' ? value.jobId : '';
+  const matchId = typeof value.matchId === 'string' ? value.matchId : '';
+  const accountId = Number(value.accountId || 0);
+  if (!/^[0-9a-f-]{36}$/i.test(jobId) || !/^\d{8,12}$/.test(matchId) || !Number.isInteger(accountId) || accountId <= 0) {
+    throw new HttpError(400, 'Некорректные параметры STRATZ-запроса.', 'invalid_stratz_request');
+  }
+
+  const job = await env.DB.prepare('SELECT * FROM verification_jobs WHERE id = ?').bind(jobId).first<VerificationJobRow>();
+  if (!job || job.match_id !== matchId || !['queued', 'running'].includes(job.status)) {
+    throw new HttpError(404, 'Активная задача проверки не найдена.', 'verification_job_not_found');
+  }
+  const user = await env.DB.prepare('SELECT account_id FROM users WHERE steam_id = ?')
+    .bind(job.steam_id).first<{ account_id: number }>();
+  if (!user || Number(user.account_id) !== accountId) {
+    throw new HttpError(403, 'Игрок задачи проверки не совпадает.', 'verification_user_mismatch');
+  }
+
+  const token = String((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN || '').trim();
+  if (!token) {
+    throw new HttpError(503, 'STRATZ_API_TOKEN не настроен в Cloudflare Worker.', 'stratz_not_configured');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(STRATZ_API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/graphql-response+json, application/json'
+      },
+      body: JSON.stringify({
+        query: STRATZ_MATCH_QUERY,
+        variables: { id: Number(matchId) }
+      })
+    });
+  } catch (error) {
+    console.warn('STRATZ Worker proxy network error:', error);
+    throw new HttpError(502, 'STRATZ временно недоступен через Worker.', 'stratz_unreachable');
+  }
+
+  const responseText = await response.text().catch(() => '');
+  if (!response.ok) {
+    console.warn('STRATZ Worker proxy non-OK:', {
+      status: response.status,
+      cfRay: response.headers.get('cf-ray'),
+      body: responseText.slice(0, 1000)
+    });
+    throw new HttpError(502, `STRATZ вернул HTTP ${response.status}.`, 'stratz_unavailable', {
+      upstreamStatus: response.status
+    });
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    throw new HttpError(502, 'STRATZ вернул некорректный JSON.', 'invalid_stratz_response');
+  }
+  if (!isRecord(payload)) {
+    throw new HttpError(502, 'STRATZ вернул некорректный ответ.', 'invalid_stratz_response');
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    console.warn('STRATZ GraphQL errors:', JSON.stringify(payload.errors).slice(0, 1000));
+  }
+
+  const match = normalizeStratzMatch(payload);
+  return json({ match }, 200, env);
+}
+
+async function handleVerificationCallback(request: Request, env: Env): Promise<Response> {
+  const { raw, value } = await readCallbackBody(request);
+  await verifyInternalRequest(request, raw, env);
 
   const jobId = typeof value.jobId === 'string' ? value.jobId : '';
   const matchId = typeof value.matchId === 'string' ? value.matchId : '';
@@ -799,18 +899,25 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(env) });
+  if (request.method === 'POST' && url.pathname === '/internal/stratz-match') {
+    return handleStratzMatch(request, env);
+  }
   if (request.method === 'POST' && url.pathname === '/internal/verification-callback') {
     return handleVerificationCallback(request, env);
   }
   if (request.method === 'GET' && url.pathname === '/health') {
-    const verifierEnv = env as Env & { GITHUB_ACTIONS_TOKEN?: string; VERIFICATION_CALLBACK_SECRET?: string };
+    const verifierEnv = env as Env & {
+      GITHUB_ACTIONS_TOKEN?: string;
+      VERIFICATION_CALLBACK_SECRET?: string;
+      STRATZ_API_TOKEN?: string;
+    };
     return json({
       ok: true, rulesVersion: RULES_VERSION, cancelPenalty: CANCEL_PENALTY_ROLLS, matchGuardSeconds: MATCH_GUARD_SECONDS,
       verificationCooldownSeconds: VERIFICATION_REQUEST_COOLDOWN_SECONDS,
       providers: {
         githubActions: Boolean(verifierEnv.GITHUB_ACTIONS_TOKEN && verifierEnv.VERIFICATION_CALLBACK_SECRET),
         directOpenDota: false,
-        stratzFallback: false
+        stratzFallback: Boolean(verifierEnv.STRATZ_API_TOKEN)
       }
     }, 200, env);
   }

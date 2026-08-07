@@ -1,10 +1,9 @@
 import process from 'node:process';
 import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
-import { normalizeStratzMatch } from '../worker/src/providers.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
-const STRATZ_API = 'https://api.stratz.com/graphql';
+const STRATZ_PROXY_PATH = '/internal/stratz-match';
 const USER_AGENT = 'dota-chaos-ranked-verifier/1.7.0 (+https://github.com/eljke/dota-chaos-build)';
 const POLL_DELAYS_MS = [15_000, 30_000, 60_000, 90_000, 120_000];
 const OPENDOTA_RETRY_DELAYS_MS = [0, 30_000];
@@ -18,7 +17,6 @@ const matchId = String(process.env.INPUT_MATCH_ID || '').trim();
 const accountId = Number(process.env.INPUT_ACCOUNT_ID || 0);
 const callbackUrl = String(process.env.VERIFICATION_CALLBACK_URL || '').trim();
 const callbackSecret = String(process.env.VERIFICATION_CALLBACK_SECRET || '').trim();
-const stratzToken = String(process.env.STRATZ_API_TOKEN || '').trim();
 let attempt;
 
 try {
@@ -88,53 +86,36 @@ function responseSuffix(response) {
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
-const STRATZ_MATCH_QUERY = `
-  query RankedMatch($id: Long!) {
-    match(id: $id) {
-      id didRadiantWin durationSeconds startDateTime lobbyType gameMode radiantKills direKills
-      playbackData { runeEvents { fromPlayer } }
-      players {
-        steamAccountId playerSlot isVictory heroId kills deaths assists leaverStatus towerDamage
-        item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
-        stats {
-          itemPurchases { itemId time }
-          itemUsed { itemId count }
-          wards { type }
-          campStack
-        }
-        playbackData { buyBackEvents { time } }
-      }
-    }
-  }
-`;
+function internalUrl(pathname) {
+  const url = new URL(callbackUrl);
+  url.pathname = pathname;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
 
 async function fetchStratzMatch() {
-  if (!stratzToken) {
-    logEvent('stratz', 'skipped', { reason: 'STRATZ_API_TOKEN is not configured' });
-    return null;
-  }
-
+  const body = JSON.stringify({ jobId, matchId, accountId });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = await signVerificationPayload(callbackSecret, timestamp, body);
   const startedAt = Date.now();
-  logEvent('stratz', 'request', { matchId });
+  logEvent('stratz', 'proxy_request', { matchId });
 
   let response;
   try {
-    response = await fetch(STRATZ_API, {
+    response = await fetch(internalUrl(STRATZ_PROXY_PATH), {
       method: 'POST',
       signal: AbortSignal.timeout(STRATZ_TIMEOUT_MS),
       headers: {
-        Authorization: `Bearer ${stratzToken}`,
         'Content-Type': 'application/json',
-        Accept: 'application/graphql-response+json, application/json',
-        'User-Agent': USER_AGENT
+        'User-Agent': USER_AGENT,
+        'X-Verification-Timestamp': timestamp,
+        'X-Verification-Signature': signature
       },
-      body: JSON.stringify({
-        query: STRATZ_MATCH_QUERY,
-        variables: { id: Number(matchId) }
-      })
+      body
     });
   } catch (error) {
-    logEvent('stratz', 'network_error', {
+    logEvent('stratz', 'proxy_network_error', {
       matchId,
       durationMs: Date.now() - startedAt,
       ...errorDetails(error)
@@ -143,7 +124,7 @@ async function fetchStratzMatch() {
   }
 
   const bodySnippet = response.ok ? undefined : await responseBodySnippet(response);
-  logEvent('stratz', 'response', {
+  logEvent('stratz', 'proxy_response', {
     matchId,
     status: response.status,
     statusText: response.statusText || undefined,
@@ -155,27 +136,15 @@ async function fetchStratzMatch() {
   if (!response.ok) return null;
 
   const payload = await response.json().catch(() => null);
-  if (!payload || typeof payload !== 'object') {
-    logEvent('stratz', 'invalid_json', { matchId });
-    return null;
-  }
-
-  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
-    logEvent('stratz', 'graphql_errors', {
-      matchId,
-      errors: payload.errors.slice(0, 5)
-    });
-  }
-
-  const match = normalizeStratzMatch(payload);
-  if (!match) {
+  const match = payload && typeof payload === 'object' ? payload.match : null;
+  if (!match || typeof match !== 'object') {
     logEvent('stratz', 'match_not_found', { matchId });
     return null;
   }
 
   const parsed = Array.isArray(match.players)
     && match.players.some(player => Array.isArray(player?.purchase_log));
-  logEvent('stratz', 'match_loaded', { matchId, parsed });
+  logEvent('stratz', 'match_loaded', { matchId, parsed, via: 'worker-proxy' });
   return match;
 }
 
@@ -232,8 +201,7 @@ async function openDota(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const url = `${OPENDOTA_API}${path}`;
   const maxAttempts = OPENDOTA_RETRY_DELAYS_MS.length;
-  const canUseFastFallback = Boolean(stratzToken)
-    && method === 'GET'
+  const canUseFastFallback = method === 'GET'
     && path.startsWith('/matches/');
   let nextDelayMs = 0;
 
@@ -363,7 +331,7 @@ async function fetchMatchWithFallback() {
   } catch (error) {
     openDotaError = error;
     logEvent('verification', 'opendota_failed', {
-      fallback: Boolean(stratzToken),
+      fallback: true,
       ...errorDetails(error)
     });
   }
@@ -439,9 +407,8 @@ async function obtainVerifiableMatch() {
     try {
       await requestParse();
     } catch (error) {
-      if (!stratzToken) throw error;
       logEvent('verification', 'parse_request_failed', {
-        fallback: 'stratz polling',
+        fallback: 'stratz proxy polling',
         ...errorDetails(error)
       });
     }
