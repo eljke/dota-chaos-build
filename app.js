@@ -195,7 +195,6 @@ const state = {
   meta: null,
   dataSourceName: '',
   usingFallback: false,
-  rankedChallenge: null,
   ready: false
 };
 
@@ -517,7 +516,6 @@ function rerollUnlocked() {
 }
 
 function toggleLock(index) {
-  if (state.rankedChallenge) return;
   if (state.locked.has(index)) state.locked.delete(index);
   else state.locked.add(index);
   renderInventory();
@@ -597,8 +595,6 @@ function renderInventory() {
     const cost = node.querySelector('.item-cost');
     const lock = node.querySelector('.lock-button');
     const restriction = node.querySelector('.restriction-badge');
-    lock.disabled = Boolean(state.rankedChallenge);
-
     img.src = assetUrl(item.img);
     img.alt = item.dname;
     imageWithFallback(img, item.dname);
@@ -788,14 +784,6 @@ function renderUpgrades() {
 }
 
 function renderContract() {
-  if (state.rankedChallenge) {
-    const modifier = state.rankedChallenge.modifier;
-    dom.contractName.textContent = modifier?.name || 'RANKED: ПОБЕДА СО СБОРКОЙ';
-    const order = state.rankedChallenge.orderRequired ? ' Предметы покупаются строго слева направо.' : '';
-    const bonus = modifier ? ` Бонус модификатора: +${Math.round((modifier.multiplier - 1) * 100)}%.` : '';
-    dom.contractDescription.textContent = `${modifier?.description || 'Соберите выданные предметы и победите.'}${order}${bonus}`;
-    return;
-  }
   const contract = CONTRACTS[state.contractIndex] || CONTRACTS[0];
   dom.contractName.textContent = contract.name;
   dom.contractDescription.textContent = contract.description;
@@ -828,41 +816,10 @@ function renderAll() {
   renderContract();
   renderContractsCatalog();
   renderSeed();
-  renderRankedLock();
 }
 
-function renderRankedLock() {
-  const locked = Boolean(state.rankedChallenge);
-  [dom.generateButton, dom.rerollUnlockedButton, dom.rerollHeroButton, dom.rerollContractButton,
-    dom.forceBootSlotToggle, dom.lobbyCodeInput, dom.importLobbyCodeButton].forEach(control => {
-    control.disabled = locked;
-  });
-}
-
-function applyRankedChallenge(attempt) {
-  state.rankedChallenge = attempt;
-  if (attempt) {
-    const hero = state.heroByKey.get(attempt.hero.key);
-    const items = attempt.items.map(item => state.itemsByKey[item.key] || state.itemsByKey[item.sourceKey]);
-    if (!hero || items.some(item => !item)) {
-      state.rankedChallenge = null;
-      showToast('Ranked-сборка не совпала с текущими игровыми данными. Обновите страницу.');
-      renderAll();
-      return;
-    }
-    state.hero = hero;
-    state.items = items;
-    state.locked.clear();
-    state.forceBootSlot = true;
-    state.seed = attempt.seed || attempt.id;
-    clearInspector();
-    updateUrl();
-  }
-  renderAll();
-}
 
 function rerollContract() {
-  if (state.rankedChallenge) return;
   let next = state.contractIndex;
   while (next === state.contractIndex && CONTRACTS.length > 1) {
     next = Math.floor(Math.random() * CONTRACTS.length);
@@ -1085,7 +1042,7 @@ async function bootstrap() {
   state.itemPool = buildItemPool(state.itemsByKey);
   state.ready = true;
   restoreOrGenerate();
-  await initRanked({ onChallenge: applyRankedChallenge, onMessage: showToast });
+  await initRanked({ onMessage: showToast });
 }
 
 bootstrap();

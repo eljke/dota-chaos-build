@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.5.1">
+  <link rel="stylesheet" href="styles.css?v=1.6.0">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -33,7 +33,7 @@
     "description":"Генератор случайного героя, сборки предметов и модификатора матча для Dota 2."
   }</script>
 </head>
-<body>
+<body data-app-view="random">
   <div class="ambient ambient--red" aria-hidden="true"></div>
   <div class="ambient ambient--blue" aria-hidden="true"></div>
 
@@ -51,6 +51,15 @@
       <span class="data-state" id="dataState"><i></i> загрузка данных</span>
     </div>
   </header>
+
+  <nav class="mode-tabs" aria-label="Режим приложения" role="tablist">
+    <button class="mode-tab is-active" id="randomViewTab" type="button" role="tab" aria-selected="true">
+      <span>ОБЫЧНЫЙ РАНДОМ</span><small>замки, точечные рероллы и коды</small>
+    </button>
+    <button class="mode-tab mode-tab--ranked" id="rankedViewTab" type="button" role="tab" aria-selected="false">
+      <span>RANKED</span><small>серверная сборка и проверка победы</small>
+    </button>
+  </nav>
 
   <section class="intro-copy" aria-labelledby="pageTitle">
     <h1 id="pageTitle">Dota 2 Random — случайный герой и сборка</h1>
@@ -182,36 +191,93 @@
     </aside>
   </main>
 
-  <section class="ranked-panel dota-panel" aria-labelledby="rankedTitle">
-    <div class="panel-cap panel-cap--gold"><span id="rankedTitle">RANKED · ПОДТВЕРЖДЁННЫЕ ПОБЕДЫ</span></div>
-    <div class="ranked-grid">
-      <div class="ranked-play">
-        <div class="ranked-auth-row">
-          <span id="rankedAuth">Проверяем Steam-сессию…</span>
-          <button class="secondary-button" id="rankedLoginButton" type="button">Войти через Steam</button>
-          <button class="text-button" id="rankedLogoutButton" type="button" hidden>Выйти</button>
-        </div>
-        <p class="ranked-explain">Сервер выдаёт сборку с проверяемым модификатором и считает все полные рероллы. После победы OpenDota проверит героя, предметы, модификатор и — по желанию — порядок покупок.</p>
-        <div class="ranked-settings">
-          <label>РЕЖИМ<select id="rankedMode"><option value="normal">Обычный</option><option value="turbo">Turbo</option></select></label>
-          <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span>Собрать в указанном порядке <b>+20%</b></span></label>
-          <button class="primary-button" id="rankedStartButton" type="button">ПОЛУЧИТЬ СБОРКУ</button>
-        </div>
-        <div class="ranked-attempt" id="rankedAttempt" hidden>
-          <div class="ranked-metrics"><span>РЕРОЛЛЫ <b id="rankedRerolls">0</b></span><span>ОЧКИ ЗА ПОБЕДУ <b id="rankedScore">1000</b></span></div>
-          <div class="ranked-actions">
-            <button class="secondary-button" id="rankedRerollButton" type="button">Реролл всей сборки</button>
-            <button class="primary-button" id="rankedCommitButton" type="button">ЗАФИКСИРОВАТЬ</button>
+  <section class="ranked-panel ranked-hub" id="rankedView" aria-labelledby="rankedTitle">
+    <header class="ranked-hero-head">
+      <div>
+        <span class="ranked-kicker">SERVER-VERIFIED CHALLENGE</span>
+        <h1 id="rankedTitle">Ranked без частичных замков</h1>
+        <p>Герой, все шесть предметов и модификатор выдаются сервером. Любой реролл меняет сборку целиком, а OpenDota проверяет результат матча.</p>
+      </div>
+      <div class="ranked-rule-chips" aria-label="Анти-абуз правила">
+        <span>СБОРКА АКТИВНА СРАЗУ</span><span>ТОЛЬКО ПОЛНЫЙ РЕРОЛЛ</span><span>ОТМЕНА СО ШТРАФОМ</span>
+      </div>
+    </header>
+
+    <div class="ranked-layout">
+      <div class="ranked-main">
+        <section class="ranked-auth-card dota-panel" aria-label="Steam-профиль">
+          <div class="ranked-user">
+            <span class="ranked-avatar-shell">
+              <img id="rankedAvatar" alt="" hidden>
+              <i id="rankedAvatarFallback" aria-hidden="true">?</i>
+            </span>
+            <span class="ranked-user-copy"><small>STEAM ПРОФИЛЬ</small><strong id="rankedName">Гость</strong><em id="rankedAuth">Проверяем сессию…</em></span>
           </div>
-          <div class="ranked-submit"><input id="rankedMatchId" inputmode="numeric" autocomplete="off" placeholder="Match ID"><button class="secondary-button" id="rankedSubmitButton" type="button">Подтвердить победу</button></div>
-        </div>
-        <p class="ranked-status" id="rankedStatus" aria-live="polite">Войдите, чтобы начать ranked-попытку.</p>
+          <div class="ranked-auth-actions">
+            <button class="secondary-button" id="rankedLoginButton" type="button">Войти через Steam</button>
+            <button class="text-button" id="rankedLogoutButton" type="button" hidden>Выйти</button>
+          </div>
+        </section>
+
+        <section class="ranked-setup dota-panel" id="rankedSetup">
+          <div class="ranked-section-title"><span>01</span><div><small>НАСТРОЙКА ПОПЫТКИ</small><h2>Выберите режим до первого ролла</h2></div></div>
+          <div class="ranked-settings">
+            <label>РЕЖИМ<select id="rankedMode"><option value="normal">Обычный</option><option value="turbo">Turbo</option></select></label>
+            <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span>Строгий порядок предметов <b>+20%</b></span></label>
+            <button class="primary-button" id="rankedStartButton" type="button">НАЧАТЬ ПОПЫТКУ</button>
+          </div>
+          <p class="ranked-fine-print">Выданная сборка активируется сразу. Для защиты от ролла во время драфта матч должен начаться после серверного таймера.</p>
+        </section>
+
+        <article class="ranked-attempt dota-panel" id="rankedAttempt" hidden>
+          <div class="ranked-attempt-top">
+            <div class="ranked-hero-card">
+              <span class="ranked-hero-image"><img id="rankedHeroImage" alt=""></span>
+              <div><small id="rankedHeroMode">NORMAL</small><h2 id="rankedHeroName">—</h2><p>Герой и сборка уже зафиксированы на сервере.</p></div>
+            </div>
+            <div class="ranked-metrics">
+              <span><small>ПОЛНЫЕ РЕРОЛЛЫ</small><b id="rankedRerolls">0</b></span>
+              <span><small>ШТРАФЫ ОТМЕНЫ</small><b id="rankedCancelPenalties">0</b></span>
+              <span class="ranked-score"><small>ОЧКИ ЗА ПОБЕДУ</small><b id="rankedScore">1000</b></span>
+            </div>
+          </div>
+
+          <section class="ranked-build" aria-labelledby="rankedBuildTitle">
+            <div class="ranked-section-title"><span>02</span><div><small>СЕРВЕРНАЯ СБОРКА</small><h2 id="rankedBuildTitle">Без замков отдельных слотов</h2></div></div>
+            <div class="ranked-items" id="rankedItems" aria-label="Ranked-предметы"></div>
+            <div class="ranked-upgrades">
+              <span><b>✓</b>Aghanim's Scepter</span><span><b>✓</b>Aghanim's Shard</span>
+            </div>
+          </section>
+
+          <section class="ranked-contract">
+            <div><small>ПРОВЕРЯЕМЫЙ МОДИФИКАТОР</small><h2 id="rankedModifierName">—</h2><p id="rankedModifierDescription">—</p></div>
+          </section>
+
+          <section class="ranked-eligibility" id="rankedEligibility">
+            <span class="ranked-timer-icon" aria-hidden="true"></span>
+            <div><small>АНТИ-АБУЗ ТАЙМЕР</small><strong id="rankedEligibilityTime">—</strong><p>Матч должен начаться после таймера.</p></div>
+          </section>
+
+          <div class="ranked-actions">
+            <button class="secondary-button" id="rankedRerollButton" type="button">ПОЛНЫЙ РЕРОЛЛ</button>
+            <button class="danger-button" id="rankedCancelButton" type="button">ОТМЕНИТЬ СО ШТРАФОМ</button>
+          </div>
+
+          <div class="ranked-submit">
+            <label for="rankedMatchId"><span>03 · ПОДТВЕРЖДЕНИЕ</span><small>Вставьте ID завершённого матча после победы</small></label>
+            <div><input id="rankedMatchId" inputmode="numeric" autocomplete="off" placeholder="Например, 8123456789"><button class="primary-button" id="rankedSubmitButton" type="button">ПРОВЕРИТЬ ПОБЕДУ</button></div>
+          </div>
+        </article>
+
+        <p class="ranked-status" id="rankedStatus" aria-live="polite">Войдите через Steam, чтобы начать ranked-попытку.</p>
       </div>
-      <div class="ranked-board">
-        <h2>ЛИДЕРБОРД</h2>
-        <p>Сумма 10 лучших побед игрока. При равенстве выше тот, у кого меньше рероллов.</p>
+
+      <aside class="ranked-board dota-panel">
+        <div class="ranked-board-head"><div><span>TOP 50</span><h2>ЛИДЕРБОРД</h2></div><i>10 лучших побед</i></div>
+        <p>Normal и Turbo считаются отдельно. При равенстве выше игрок с меньшим суммарным штрафом.</p>
         <ol id="rankedLeaderboard"><li class="ranked-empty">Загрузка…</li></ol>
-      </div>
+      </aside>
     </div>
   </section>
 
@@ -237,12 +303,34 @@
     <div class="contracts-list" id="contractsList"></div>
   </dialog>
 
+
+  <dialog class="contracts-dialog ranked-cancel-dialog" id="rankedCancelDialog" aria-labelledby="rankedCancelTitle">
+    <div class="contracts-dialog__head">
+      <div><span>ШТРАФ ЗА ОТМЕНУ</span><h2 id="rankedCancelTitle">Завершить текущую попытку?</h2></div>
+      <button id="rankedCancelClose" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="ranked-cancel-body">
+      <p id="rankedCancelPenaltyText">Отмена добавит виртуальный реролл к следующей попытке.</p>
+      <div><button class="secondary-button" id="rankedCancelKeep" type="button">ОСТАТЬСЯ</button><button class="danger-button" id="rankedCancelConfirm" type="button">ОТМЕНИТЬ ПОПЫТКУ</button></div>
+    </div>
+  </dialog>
+
   <dialog class="contracts-dialog release-dialog" id="releaseNotesDialog" aria-labelledby="releaseNotesTitle">
     <div class="contracts-dialog__head">
       <div><span>ИСТОРИЯ ОБНОВЛЕНИЙ</span><h2 id="releaseNotesTitle">Что нового</h2></div>
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>1.6.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
+        <ul>
+          <li>Вынесли ranked в отдельную вкладку с собственной карточкой героя и предметов — обычные замки слотов туда больше не попадают.</li>
+          <li>Сборка активируется сервером сразу; полный реролл обновляет защитный таймер перед стартом матча.</li>
+          <li>Добавили отмену попытки с накапливаемым штрафом и коротким кулдауном.</li>
+          <li>Исправили обработку новых и ещё не распарсенных матчей OpenDota.</li>
+          <li>Steam-профиль теперь показывает никнейм и аватар; лидерборд тоже стал визуальнее.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>1.5.1</h3><time datetime="2026-08-06">6 августа 2026</time></header>
         <ul><li>Добавили доступную прямо на сайте историю обновлений.</li></ul>
@@ -285,6 +373,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.5.1"></script>
+  <script type="module" src="app.js?v=1.6.0"></script>
 </body>
 </html>

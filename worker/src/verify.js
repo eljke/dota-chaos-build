@@ -7,9 +7,10 @@ function firstPurchaseIndex(purchaseLog, item) {
   return purchaseLog.findIndex(entry => entry?.key === item.key || entry?.key === item.sourceKey);
 }
 
-export function calculateScore({ rerolls, orderRequired, modifierMultiplier = 1 }) {
+export function calculateScore({ rerolls, cancelPenalties = 0, orderRequired, modifierMultiplier = 1 }) {
   const orderMultiplier = orderRequired ? 1.2 : 1;
-  return Math.round(1000 * modifierMultiplier * orderMultiplier / (rerolls + 1));
+  const penaltyDivisor = Number(rerolls) + Number(cancelPenalties) + 1;
+  return Math.round(1000 * modifierMultiplier * orderMultiplier / penaltyDivisor);
 }
 
 export function verifyModifier({ modifierId, match, player, attempt }) {
@@ -75,7 +76,12 @@ export function verifyMatch({ match, attempt, accountId }) {
   if (Number(player.hero_id) !== Number(attempt.hero_id)) errors.push('Сыгран не выданный герой.');
   if (Number(player.win) !== 1) errors.push('Матч не завершён победой.');
   if (Number(player.leaver_status) !== 0) errors.push('Матч содержит abandon или ранний выход.');
-  if (Number(match.start_time) < Number(attempt.committed_at) - 120) errors.push('Матч начался до фиксации ranked-сборки.');
+
+  const guardSeconds = Number(attempt.match_guard_seconds || 0);
+  const eligibleAfter = Number(attempt.committed_at) + guardSeconds;
+  if (!Number.isFinite(eligibleAfter) || Number(match.start_time) < eligibleAfter) {
+    errors.push(`Матч начался слишком рано: ranked-сборка должна быть выдана минимум за ${Math.ceil(guardSeconds / 60)} мин. до старта.`);
+  }
 
   const purchaseLog = player.purchase_log;
   const purchaseIndices = attempt.items.map(item => firstPurchaseIndex(purchaseLog, item));
@@ -112,6 +118,8 @@ export function verifyMatch({ match, attempt, accountId }) {
       duration: Number(match.duration),
       gameMode: Number(match.game_mode),
       lobbyType: Number(match.lobby_type),
+      committedAt: Number(attempt.committed_at),
+      eligibleAfter,
       modifier: modifierProof.evidence
     }
   };

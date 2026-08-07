@@ -7,23 +7,34 @@ type JsonObject = Record<string, unknown>;
 type RankedItem = { id: number; key: string; sourceKey: string; name: string; cost: number };
 type RankedHero = { id: number; key: string; name: string; attack_type: string; roles: string[] };
 type RankedPool = { generatedAt: string; heroes: RankedHero[]; items: RankedItem[] };
-type UserRow = { steam_id: string; account_id: number; display_name: string };
+type UserRow = { steam_id: string; account_id: number; display_name: string; avatar_url: string };
 type LoginCodeRow = { steam_id: string };
+type PenaltyRow = { cancel_penalties: number; cooldown_until: number };
 type AttemptRow = {
   id: string; steam_id: string; mode: 'normal' | 'turbo'; order_required: number;
   status: 'rolling' | 'committed' | 'verified' | 'expired'; roll_count: number; seed: string;
   hero_id: number; hero_key: string; hero_name: string; items_json: string; modifier_id: string | null;
   rules_version: string; data_version: string; created_at: number; updated_at: number; committed_at: number | null;
+  cancel_penalties: number;
 };
 
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
+const STEAM_PLAYER_SUMMARIES = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/';
 const STEAM_ID_BASE = 76561197960265728n;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ATTEMPT_SECONDS = 24 * 60 * 60;
-const RULES_VERSION = '1.5.0';
+const CANCEL_COOLDOWN_SECONDS = 60;
+const CANCEL_PENALTY_ROLLS = 1;
+const MATCH_GUARD_SECONDS = { normal: 60, turbo: 60 } as const;
+const RULES_VERSION = '1.6.0';
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string, readonly code = 'request_failed') {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code = 'request_failed',
+    readonly details: JsonObject = {}
+  ) {
     super(message);
   }
 }
@@ -85,13 +96,58 @@ function safeReturnTo(value: string | null, env: Env): string {
   }
 }
 
+
+function cleanProfileText(value: unknown, fallback: string): string {
+  const normalized = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return normalized ? normalized.slice(0, 80) : fallback;
+}
+
+async function fetchSteamProfile(steamId: string, env: Env): Promise<{ displayName: string; avatarUrl: string }> {
+  const fallback = { displayName: `Игрок ${steamId.slice(-6)}`, avatarUrl: '' };
+  const apiKey = String((env as Env & { STEAM_API_KEY?: string }).STEAM_API_KEY || '').trim();
+
+  if (apiKey) {
+    try {
+      const url = new URL(STEAM_PLAYER_SUMMARIES);
+      url.searchParams.set('key', apiKey);
+      url.searchParams.set('steamids', steamId);
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const body: unknown = response.ok ? await response.json() : null;
+      const player = isRecord(body) && isRecord(body.response) && Array.isArray(body.response.players)
+        ? body.response.players[0]
+        : null;
+      if (isRecord(player)) {
+        return {
+          displayName: cleanProfileText(player.personaname, fallback.displayName),
+          avatarUrl: typeof player.avatarfull === 'string' && /^https:\/\//i.test(player.avatarfull) ? player.avatarfull : ''
+        };
+      }
+    } catch (error) {
+      console.warn('Steam Web API profile lookup failed:', error);
+    }
+  }
+
+  try {
+    const response = await fetch(`https://steamcommunity.com/profiles/${steamId}?xml=1`, { headers: { Accept: 'application/xml' } });
+    const xml = response.ok ? await response.text() : '';
+    const displayName = xml.match(/<steamID><!\[CDATA\[([\s\S]*?)\]\]><\/steamID>/)?.[1];
+    const avatarUrl = xml.match(/<avatarFull><!\[CDATA\[([\s\S]*?)\]\]><\/avatarFull>/)?.[1];
+    return {
+      displayName: cleanProfileText(displayName, fallback.displayName),
+      avatarUrl: avatarUrl && /^https:\/\//i.test(avatarUrl) ? avatarUrl : ''
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 async function getUser(request: Request, env: Env): Promise<UserRow | null> {
   const authorization = request.headers.get('authorization');
   if (!authorization?.startsWith('Bearer ')) return null;
   const token = authorization.slice(7).trim();
   if (!token) return null;
   return env.DB.prepare(`
-    SELECT users.steam_id, users.account_id, users.display_name
+    SELECT users.steam_id, users.account_id, users.display_name, users.avatar_url
     FROM sessions JOIN users ON users.steam_id = sessions.steam_id
     WHERE sessions.token_hash = ? AND sessions.expires_at > ?
   `).bind(await hashToken(token), nowSeconds()).first<UserRow>();
@@ -144,20 +200,34 @@ function createRoll(pool: RankedPool, mode: 'normal' | 'turbo', orderRequired: b
 function challenge(row: AttemptRow) {
   const items: RankedItem[] = JSON.parse(row.items_json);
   const modifier = modifierById(row.modifier_id);
+  const cancelPenalties = Number(row.cancel_penalties || 0);
+  const committedAt = Number(row.committed_at || row.updated_at);
+  const matchGuardSeconds = MATCH_GUARD_SECONDS[row.mode];
   return {
     id: row.id,
     status: row.status,
     mode: row.mode,
     orderRequired: row.order_required === 1,
     rerolls: row.roll_count,
+    cancelPenalties,
+    totalPenalties: row.roll_count + cancelPenalties,
     rollsSeen: row.roll_count + 1,
-    scorePreview: calculateScore({ rerolls: row.roll_count, orderRequired: row.order_required === 1, modifierMultiplier: modifier?.multiplier }),
+    scorePreview: calculateScore({
+      rerolls: row.roll_count,
+      cancelPenalties,
+      orderRequired: row.order_required === 1,
+      modifierMultiplier: modifier?.multiplier
+    }),
     hero: { id: row.hero_id, key: row.hero_key, name: row.hero_name },
     items,
     modifier,
     rulesVersion: row.rules_version,
     dataVersion: row.data_version,
-    committedAt: row.committed_at
+    committedAt,
+    eligibleAt: committedAt + matchGuardSeconds,
+    expiresAt: row.created_at + ATTEMPT_SECONDS,
+    matchGuardSeconds,
+    cancelCost: CANCEL_PENALTY_ROLLS
   };
 }
 
@@ -206,10 +276,12 @@ async function handleSteamCallback(request: Request, url: URL, env: Env): Promis
 
   const now = nowSeconds();
   const code = randomToken(24);
+  const profile = await fetchSteamProfile(steamId, env);
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO users (steam_id, account_id, display_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?) ON CONFLICT(steam_id) DO UPDATE SET account_id = excluded.account_id, updated_at = excluded.updated_at`)
-      .bind(steamId, Number(accountIdBig), `Steam ${steamId.slice(-6)}`, now, now),
+    env.DB.prepare(`INSERT INTO users (steam_id, account_id, display_name, avatar_url, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(steam_id) DO UPDATE SET account_id = excluded.account_id,
+      display_name = excluded.display_name, avatar_url = excluded.avatar_url, updated_at = excluded.updated_at`)
+      .bind(steamId, Number(accountIdBig), profile.displayName, profile.avatarUrl, now, now),
     env.DB.prepare('INSERT INTO login_codes (code_hash, steam_id, expires_at) VALUES (?, ?, ?)')
       .bind(await hashToken(code), steamId, now + 300)
   ]);
@@ -229,7 +301,7 @@ async function handleExchange(request: Request, env: Env): Promise<Response> {
   const now = nowSeconds();
   await env.DB.prepare('INSERT INTO sessions (token_hash, steam_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
     .bind(await hashToken(token), login.steam_id, now + SESSION_SECONDS, now).run();
-  const user = await env.DB.prepare('SELECT steam_id, account_id, display_name FROM users WHERE steam_id = ?')
+  const user = await env.DB.prepare('SELECT steam_id, account_id, display_name, avatar_url FROM users WHERE steam_id = ?')
     .bind(login.steam_id).first<UserRow>();
   return json({ token, user }, 200, env);
 }
@@ -240,16 +312,64 @@ async function getAttempt(id: string, steamId: string, env: Env): Promise<Attemp
   return row;
 }
 
+
+async function getPenalty(steamId: string, mode: 'normal' | 'turbo', env: Env): Promise<PenaltyRow> {
+  return await env.DB.prepare('SELECT cancel_penalties, cooldown_until FROM ranked_penalties WHERE steam_id = ? AND mode = ?')
+    .bind(steamId, mode).first<PenaltyRow>() || { cancel_penalties: 0, cooldown_until: 0 };
+}
+
+async function requestOpenDotaParse(matchId: string, env: Env): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${env.OPENDOTA_API}/request/${matchId}`, { method: 'POST', headers: { Accept: 'application/json' } });
+  } catch {
+    throw new HttpError(502, 'Не удалось отправить матч на разбор OpenDota. Попробуйте позже.', 'opendota_unreachable');
+  }
+  if (response.status === 429) throw new HttpError(429, 'OpenDota временно ограничила запросы. Попробуйте через несколько минут.', 'opendota_rate_limited');
+  if (!response.ok && response.status !== 409) {
+    throw new HttpError(502, 'OpenDota не приняла запрос на разбор матча.', 'parse_request_failed');
+  }
+}
+
+async function fetchOpenDotaMatch(matchId: string, env: Env): Promise<JsonObject | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${env.OPENDOTA_API}/matches/${matchId}`, { headers: { Accept: 'application/json' } });
+  } catch {
+    throw new HttpError(502, 'OpenDota сейчас недоступна. Попробуйте подтвердить матч позже.', 'opendota_unreachable');
+  }
+  if (response.status === 404) {
+    await requestOpenDotaParse(matchId, env);
+    return null;
+  }
+  if (response.status === 429) throw new HttpError(429, 'OpenDota временно ограничила запросы. Попробуйте через несколько минут.', 'opendota_rate_limited');
+  if (!response.ok) throw new HttpError(502, 'OpenDota временно не вернула данные матча.', 'match_unavailable');
+  const match: unknown = await response.json().catch(() => null);
+  if (!isRecord(match)) throw new HttpError(502, 'OpenDota вернула неверный ответ.', 'invalid_match');
+  return match;
+}
+
 async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const user = await requireUser(request, env);
   const body = await readJson(request);
   const mode = body.mode === 'turbo' ? 'turbo' : 'normal';
   const orderRequired = body.orderRequired === true;
   const now = nowSeconds();
-  const active = await env.DB.prepare(`SELECT * FROM attempts
+  let active = await env.DB.prepare(`SELECT * FROM attempts
     WHERE steam_id = ? AND status IN ('rolling', 'committed') AND created_at > ? ORDER BY created_at DESC LIMIT 1`)
     .bind(user.steam_id, now - ATTEMPT_SECONDS).first<AttemptRow>();
-  if (active) return json({ error: 'Сначала завершите текущую попытку.', code: 'active_attempt', attempt: challenge(active) }, 409, env);
+  if (active?.status === 'rolling') {
+    await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
+      .bind(now, now, active.id).run();
+    active = await getAttempt(active.id, user.steam_id, env);
+  }
+  if (active) return json({ error: 'Сначала завершите или отмените текущую попытку.', code: 'active_attempt', attempt: challenge(active) }, 409, env);
+
+  const penalty = await getPenalty(user.steam_id, mode, env);
+  if (penalty.cooldown_until > now) {
+    const retryAfter = penalty.cooldown_until - now;
+    throw new HttpError(429, `После отмены новая попытка будет доступна через ${retryAfter} сек.`, 'cancel_cooldown', { retryAfter });
+  }
 
   await env.DB.prepare(`UPDATE attempts SET status = 'expired', updated_at = ?
     WHERE steam_id = ? AND status IN ('rolling', 'committed')`).bind(now, user.steam_id).run();
@@ -257,74 +377,108 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
   const roll = createRoll(pool, mode, orderRequired);
   const id = crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO attempts
-    (id, steam_id, mode, order_required, status, roll_count, seed, hero_id, hero_key, hero_name, items_json,
-     modifier_id, rules_version, data_version, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'rolling', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, user.steam_id, mode, orderRequired ? 1 : 0, roll.seed, roll.hero.id, roll.hero.key, roll.hero.name,
-      JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt, now, now).run();
+    (id, steam_id, mode, order_required, status, roll_count, cancel_penalties, seed, hero_id, hero_key, hero_name, items_json,
+     modifier_id, rules_version, data_version, created_at, updated_at, committed_at)
+    VALUES (?, ?, ?, ?, 'committed', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, user.steam_id, mode, orderRequired ? 1 : 0, penalty.cancel_penalties, roll.seed, roll.hero.id, roll.hero.key, roll.hero.name,
+      JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt, now, now, now).run();
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 201, env);
 }
 
 async function handleReroll(id: string, request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const user = await requireUser(request, env);
   const current = await getAttempt(id, user.steam_id, env);
-  if (current.status !== 'rolling') throw new HttpError(409, 'Зафиксированную сборку нельзя перебросить.', 'attempt_locked');
+  if (current.status !== 'committed') throw new HttpError(409, 'Эту попытку уже нельзя перебросить.', 'attempt_locked');
   const pool = await getPool(env, ctx);
   const roll = createRoll(pool, current.mode, current.order_required === 1);
+  const now = nowSeconds();
   const result = await env.DB.prepare(`UPDATE attempts SET roll_count = roll_count + 1, seed = ?, hero_id = ?, hero_key = ?,
-    hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, updated_at = ? WHERE id = ? AND status = 'rolling' AND roll_count = ?`)
+    hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, committed_at = ?, updated_at = ?
+    WHERE id = ? AND status = 'committed' AND roll_count = ?`)
     .bind(roll.seed, roll.hero.id, roll.hero.key, roll.hero.name, JSON.stringify(roll.items), roll.modifier.id, RULES_VERSION, pool.generatedAt,
-      nowSeconds(), id, current.roll_count).run();
+      now, now, id, current.roll_count).run();
   if (result.meta.changes !== 1) throw new HttpError(409, 'Сборка уже была изменена в другой вкладке.', 'reroll_conflict');
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 200, env);
 }
 
 async function handleCommit(id: string, request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
+  const current = await getAttempt(id, user.steam_id, env);
+  if (current.status === 'committed') return json({ attempt: challenge(current) }, 200, env);
+  if (current.status !== 'rolling') throw new HttpError(409, 'Попытка уже завершена.', 'commit_conflict');
   const now = nowSeconds();
-  const result = await env.DB.prepare(`UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ?
+  await env.DB.prepare(`UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ?
     WHERE id = ? AND steam_id = ? AND status = 'rolling'`).bind(now, now, id, user.steam_id).run();
-  if (result.meta.changes !== 1) throw new HttpError(409, 'Попытка уже зафиксирована или завершена.', 'commit_conflict');
   return json({ attempt: challenge(await getAttempt(id, user.steam_id, env)) }, 200, env);
+}
+
+async function handleCancel(id: string, request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const current = await getAttempt(id, user.steam_id, env);
+  if (!['rolling', 'committed'].includes(current.status)) throw new HttpError(409, 'Попытка уже завершена.', 'cancel_conflict');
+  const now = nowSeconds();
+  const cooldownUntil = now + CANCEL_COOLDOWN_SECONDS;
+  const cancelled = await env.DB.prepare(`UPDATE attempts SET status = 'expired', updated_at = ?
+    WHERE id = ? AND steam_id = ? AND status IN ('rolling', 'committed') RETURNING mode`)
+    .bind(now, id, user.steam_id).first<{ mode: 'normal' | 'turbo' }>();
+  if (!cancelled) throw new HttpError(409, 'Попытка уже изменилась в другой вкладке.', 'cancel_conflict');
+  await env.DB.prepare(`INSERT INTO ranked_penalties (steam_id, mode, cancel_penalties, cooldown_until, updated_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(steam_id, mode) DO UPDATE SET
+    cancel_penalties = ranked_penalties.cancel_penalties + excluded.cancel_penalties,
+    cooldown_until = MAX(ranked_penalties.cooldown_until, excluded.cooldown_until), updated_at = excluded.updated_at`)
+    .bind(user.steam_id, cancelled.mode, CANCEL_PENALTY_ROLLS, cooldownUntil, now).run();
+  const penalty = await getPenalty(user.steam_id, current.mode, env);
+  return json({ status: 'cancelled', cancelPenalties: penalty.cancel_penalties, cooldownUntil }, 200, env);
 }
 
 async function handleSubmit(id: string, request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const attempt = await getAttempt(id, user.steam_id, env);
-  if (attempt.status !== 'committed' || !attempt.committed_at) throw new HttpError(409, 'Сначала зафиксируйте сборку.', 'attempt_not_committed');
+  if (attempt.status !== 'committed' || !attempt.committed_at) throw new HttpError(409, 'Ranked-попытка не активна.', 'attempt_not_committed');
   const body = await readJson(request);
   const matchId = typeof body.matchId === 'string' ? body.matchId.trim() : String(body.matchId || '');
   if (!/^\d{8,12}$/.test(matchId)) throw new HttpError(400, 'Введите корректный match ID.', 'invalid_match_id');
 
-  const response = await fetch(`${env.OPENDOTA_API}/matches/${matchId}`, { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new HttpError(response.status === 404 ? 404 : 502, 'OpenDota не вернула данные матча.', 'match_unavailable');
-  const match: unknown = await response.json();
-  if (!isRecord(match)) throw new HttpError(502, 'OpenDota вернула неверный ответ.', 'invalid_match');
+  const match = await fetchOpenDotaMatch(matchId, env);
+  if (!match) return json({ status: 'parsing', message: 'Матч отправлен на разбор OpenDota.' }, 202, env);
   const proof = verifyMatch({
     match,
-    attempt: { ...attempt, items: JSON.parse(attempt.items_json) },
+    attempt: {
+      ...attempt,
+      items: JSON.parse(attempt.items_json),
+      match_guard_seconds: MATCH_GUARD_SECONDS[attempt.mode]
+    },
     accountId: user.account_id
   });
   if (!proof.parsed) {
-    await fetch(`${env.OPENDOTA_API}/request/${matchId}`, { method: 'POST', headers: { Accept: 'application/json' } });
-    return json({ status: 'parsing', errors: proof.errors }, 202, env);
+    await requestOpenDotaParse(matchId, env);
+    return json({ status: 'parsing', message: 'OpenDota разбирает реплей.', errors: proof.errors }, 202, env);
   }
-  if (!proof.ok) return json({ status: 'rejected', errors: proof.errors }, 422, env);
+  if (!proof.ok) {
+    return json({ error: proof.errors.join(' '), code: 'verification_failed', status: 'rejected', errors: proof.errors }, 422, env);
+  }
 
   const modifier = modifierById(attempt.modifier_id);
-  const score = calculateScore({ rerolls: attempt.roll_count, orderRequired: attempt.order_required === 1, modifierMultiplier: modifier?.multiplier });
+  const cancelPenalties = Number(attempt.cancel_penalties || 0);
+  const score = calculateScore({
+    rerolls: attempt.roll_count,
+    cancelPenalties,
+    orderRequired: attempt.order_required === 1,
+    modifierMultiplier: modifier?.multiplier
+  });
   const now = nowSeconds();
   try {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO submissions
-        (id, attempt_id, steam_id, match_id, score, rerolls, order_required, mode, modifier_id, evidence_json, verified_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(crypto.randomUUID(), attempt.id, user.steam_id, matchId, score, attempt.roll_count, attempt.order_required,
+        (id, attempt_id, steam_id, match_id, score, rerolls, cancel_penalties, order_required, mode, modifier_id, evidence_json, verified_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), attempt.id, user.steam_id, matchId, score, attempt.roll_count, cancelPenalties, attempt.order_required,
           attempt.mode, attempt.modifier_id, JSON.stringify(proof.evidence), now),
       env.DB.prepare("UPDATE attempts SET status = 'verified', updated_at = ? WHERE id = ? AND status = 'committed'")
         .bind(now, attempt.id),
-      env.DB.prepare('UPDATE users SET display_name = ?, updated_at = ? WHERE steam_id = ?')
-        .bind(typeof proof.player?.personaname === 'string' ? proof.player.personaname.slice(0, 80) : user.display_name, now, user.steam_id)
+      env.DB.prepare(`INSERT INTO ranked_penalties (steam_id, mode, cancel_penalties, cooldown_until, updated_at)
+        VALUES (?, ?, 0, 0, ?) ON CONFLICT(steam_id, mode) DO UPDATE SET cancel_penalties = 0, cooldown_until = 0, updated_at = excluded.updated_at`)
+        .bind(user.steam_id, attempt.mode, now)
     ]);
   } catch (error) {
     if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
@@ -342,13 +496,14 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
       SELECT submissions.*, ROW_NUMBER() OVER (PARTITION BY steam_id ORDER BY score DESC, verified_at ASC) AS run_rank
       FROM submissions WHERE mode = ?
     )
-    SELECT users.steam_id AS steamId, users.display_name AS displayName,
+    SELECT users.display_name AS displayName, users.avatar_url AS avatarUrl,
       SUM(ranked.score) AS score, COUNT(*) AS verifiedWins,
-      SUM(ranked.rerolls) AS rerolls, SUM(ranked.order_required) AS orderedWins
+      SUM(ranked.rerolls) AS rerolls, SUM(ranked.cancel_penalties) AS cancelPenalties,
+      SUM(ranked.rerolls + ranked.cancel_penalties) AS totalPenalties, SUM(ranked.order_required) AS orderedWins
     FROM ranked JOIN users ON users.steam_id = ranked.steam_id
     WHERE ranked.run_rank <= 10
     GROUP BY ranked.steam_id
-    ORDER BY score DESC, rerolls ASC, MIN(ranked.verified_at) ASC
+    ORDER BY score DESC, totalPenalties ASC, MIN(ranked.verified_at) ASC
     LIMIT 50
   `).bind(mode).all();
   return json({ mode, entries: results }, 200, env);
@@ -357,7 +512,9 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(env) });
-  if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true, rulesVersion: RULES_VERSION }, 200, env);
+  if (request.method === 'GET' && url.pathname === '/health') return json({
+    ok: true, rulesVersion: RULES_VERSION, cancelPenalty: CANCEL_PENALTY_ROLLS, matchGuardSeconds: MATCH_GUARD_SECONDS
+  }, 200, env);
   if (request.method === 'GET' && url.pathname === '/auth/steam') return handleSteamLogin(url, env);
   if (request.method === 'GET' && url.pathname === '/auth/steam/callback') return handleSteamCallback(request, url, env);
   if (request.method === 'POST' && url.pathname === '/auth/exchange') return handleExchange(request, env);
@@ -365,16 +522,23 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (request.method === 'GET' && url.pathname === '/leaderboard') return handleLeaderboard(url, env);
   if (request.method === 'GET' && url.pathname === '/attempts/active') {
     const user = await requireUser(request, env);
-    const active = await env.DB.prepare(`SELECT * FROM attempts WHERE steam_id = ? AND status IN ('rolling', 'committed')
+    let active = await env.DB.prepare(`SELECT * FROM attempts WHERE steam_id = ? AND status IN ('rolling', 'committed')
       AND created_at > ? ORDER BY created_at DESC LIMIT 1`).bind(user.steam_id, nowSeconds() - ATTEMPT_SECONDS).first<AttemptRow>();
+    if (active?.status === 'rolling') {
+      const now = nowSeconds();
+      await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
+        .bind(now, now, active.id).run();
+      active = await getAttempt(active.id, user.steam_id, env);
+    }
     return json({ attempt: active ? challenge(active) : null }, 200, env);
   }
   if (request.method === 'POST' && url.pathname === '/attempts') return handleCreateAttempt(request, env, ctx);
 
-  const match = url.pathname.match(/^\/attempts\/([0-9a-f-]+)\/(reroll|commit|submit)$/i);
+  const match = url.pathname.match(/^\/attempts\/([0-9a-f-]+)\/(reroll|commit|cancel|submit)$/i);
   if (request.method === 'POST' && match) {
     if (match[2] === 'reroll') return handleReroll(match[1], request, env, ctx);
     if (match[2] === 'commit') return handleCommit(match[1], request, env);
+    if (match[2] === 'cancel') return handleCancel(match[1], request, env);
     return handleSubmit(match[1], request, env);
   }
   throw new HttpError(404, 'Маршрут не найден.', 'not_found');
@@ -393,7 +557,7 @@ export default {
         path: new URL(request.url).pathname,
         error: error instanceof Error ? error.message : String(error)
       }));
-      return json({ error: message, code: known ? error.code : 'internal_error' }, known ? error.status : 500, env);
+      return json({ error: message, code: known ? error.code : 'internal_error', ...(known ? error.details : {}) }, known ? error.status : 500, env);
     }
   }
 } satisfies ExportedHandler<Env>;

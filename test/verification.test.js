@@ -7,7 +7,7 @@ const items = [
   { id: 1, key: 'blink', sourceKey: 'blink', name: 'Blink Dagger' }
 ];
 const attempt = {
-  mode: 'normal', hero_id: 2, committed_at: 1000, order_required: 1, items
+  mode: 'normal', hero_id: 2, committed_at: 1000, match_guard_seconds: 0, order_required: 1, items
 };
 const player = {
   account_id: 42, hero_id: 2, win: 1, leaver_status: 0,
@@ -24,6 +24,7 @@ test('score accounts for order and every seen build', () => {
   assert.equal(calculateScore({ rerolls: 0, orderRequired: true }), 1200);
   assert.equal(calculateScore({ rerolls: 1, orderRequired: true }), 600);
   assert.equal(calculateScore({ rerolls: 4, orderRequired: false }), 200);
+  assert.equal(calculateScore({ rerolls: 0, cancelPenalties: 1, orderRequired: false }), 500);
 });
 
 test('valid match proves hero, victory, inventory and order', () => {
@@ -50,4 +51,11 @@ test('match verification rejects a failed assigned modifier', () => {
   const result = verifyMatch({ match, attempt: challenged, accountId: 42 });
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(error => error.includes('Осадный контракт')));
+});
+
+test('match must start after the anti-abuse guard window', () => {
+  const guarded = { ...attempt, committed_at: 1000, match_guard_seconds: 300 };
+  const result = verifyMatch({ match: { ...match, start_time: 1299 }, attempt: guarded, accountId: 42 });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(error => error.includes('слишком рано')));
 });
