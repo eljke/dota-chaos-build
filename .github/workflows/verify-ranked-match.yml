@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Fetch and verify OpenDota match
+      - name: Fetch and verify match
         env:
           INPUT_JOB_ID: ${{ inputs.job_id }}
           INPUT_MATCH_ID: ${{ inputs.match_id }}
@@ -48,4 +48,5 @@ jobs:
           INPUT_ATTEMPT_PAYLOAD: ${{ inputs.attempt_payload }}
           VERIFICATION_CALLBACK_URL: ${{ secrets.VERIFICATION_CALLBACK_URL }}
           VERIFICATION_CALLBACK_SECRET: ${{ secrets.VERIFICATION_CALLBACK_SECRET }}
+          STRATZ_API_TOKEN: ${{ secrets.STRATZ_API_TOKEN }}
         run: node scripts/verify-ranked-match.mjs

@@ -1,12 +1,15 @@
 import process from 'node:process';
 import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
+import { normalizeStratzMatch } from '../worker/src/providers.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
+const STRATZ_API = 'https://api.stratz.com/graphql';
 const USER_AGENT = 'dota-chaos-ranked-verifier/1.7.0 (+https://github.com/eljke/dota-chaos-build)';
 const POLL_DELAYS_MS = [15_000, 30_000, 60_000, 90_000, 120_000];
-const OPENDOTA_RETRY_DELAYS_MS = [0, 10_000, 30_000, 60_000];
+const OPENDOTA_RETRY_DELAYS_MS = [0, 30_000];
 const OPENDOTA_TIMEOUT_MS = 35_000;
+const STRATZ_TIMEOUT_MS = 35_000;
 const OPENDOTA_TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);
 const RESPONSE_BODY_LOG_LIMIT = 1_000;
 
@@ -15,6 +18,7 @@ const matchId = String(process.env.INPUT_MATCH_ID || '').trim();
 const accountId = Number(process.env.INPUT_ACCOUNT_ID || 0);
 const callbackUrl = String(process.env.VERIFICATION_CALLBACK_URL || '').trim();
 const callbackSecret = String(process.env.VERIFICATION_CALLBACK_SECRET || '').trim();
+const stratzToken = String(process.env.STRATZ_API_TOKEN || '').trim();
 let attempt;
 
 try {
@@ -84,6 +88,97 @@ function responseSuffix(response) {
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
+const STRATZ_MATCH_QUERY = `
+  query RankedMatch($id: Long!) {
+    match(id: $id) {
+      id didRadiantWin durationSeconds startDateTime lobbyType gameMode radiantKills direKills
+      playbackData { runeEvents { fromPlayer } }
+      players {
+        steamAccountId playerSlot isVictory heroId kills deaths assists leaverStatus towerDamage
+        item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
+        stats {
+          itemPurchases { itemId time }
+          itemUsed { itemId count }
+          wards { type }
+          campStack
+        }
+        playbackData { buyBackEvents { time } }
+      }
+    }
+  }
+`;
+
+async function fetchStratzMatch() {
+  if (!stratzToken) {
+    logEvent('stratz', 'skipped', { reason: 'STRATZ_API_TOKEN is not configured' });
+    return null;
+  }
+
+  const startedAt = Date.now();
+  logEvent('stratz', 'request', { matchId });
+
+  let response;
+  try {
+    response = await fetch(STRATZ_API, {
+      method: 'POST',
+      signal: AbortSignal.timeout(STRATZ_TIMEOUT_MS),
+      headers: {
+        Authorization: `Bearer ${stratzToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/graphql-response+json, application/json',
+        'User-Agent': USER_AGENT
+      },
+      body: JSON.stringify({
+        query: STRATZ_MATCH_QUERY,
+        variables: { id: Number(matchId) }
+      })
+    });
+  } catch (error) {
+    logEvent('stratz', 'network_error', {
+      matchId,
+      durationMs: Date.now() - startedAt,
+      ...errorDetails(error)
+    });
+    return null;
+  }
+
+  const bodySnippet = response.ok ? undefined : await responseBodySnippet(response);
+  logEvent('stratz', 'response', {
+    matchId,
+    status: response.status,
+    statusText: response.statusText || undefined,
+    durationMs: Date.now() - startedAt,
+    headers: responseHeaders(response),
+    bodySnippet
+  });
+
+  if (!response.ok) return null;
+
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== 'object') {
+    logEvent('stratz', 'invalid_json', { matchId });
+    return null;
+  }
+
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    logEvent('stratz', 'graphql_errors', {
+      matchId,
+      errors: payload.errors.slice(0, 5)
+    });
+  }
+
+  const match = normalizeStratzMatch(payload);
+  if (!match) {
+    logEvent('stratz', 'match_not_found', { matchId });
+    return null;
+  }
+
+  const parsed = Array.isArray(match.players)
+    && match.players.some(player => Array.isArray(player?.purchase_log));
+  logEvent('stratz', 'match_loaded', { matchId, parsed });
+  return match;
+}
+
 async function callback(payload) {
   const body = JSON.stringify({ jobId, matchId, ...payload });
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -127,20 +222,24 @@ async function callback(payload) {
   throw lastError || new Error('Callback failed.');
 }
 
-function retryAfterFromResponse(response, body) {
+function retryAfterFromResponse(response, body, fallback = 300) {
   const header = Number(response.headers.get('retry-after') || 0);
   if (header > 0) return Math.min(3600, Math.ceil(header));
-  return /daily/i.test(body) ? 1800 : 300;
+  return /daily/i.test(body) ? 1800 : fallback;
 }
 
 async function openDota(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const url = `${OPENDOTA_API}${path}`;
   const maxAttempts = OPENDOTA_RETRY_DELAYS_MS.length;
+  const canUseFastFallback = Boolean(stratzToken)
+    && method === 'GET'
+    && path.startsWith('/matches/');
+  let nextDelayMs = 0;
 
   for (let index = 0; index < maxAttempts; index += 1) {
     const attemptNumber = index + 1;
-    const delay = OPENDOTA_RETRY_DELAYS_MS[index];
+    const delay = index === 0 ? 0 : nextDelayMs || OPENDOTA_RETRY_DELAYS_MS[index];
 
     if (delay > 0) {
       logEvent('opendota', 'retry_wait', {
@@ -210,6 +309,20 @@ async function openDota(path, options = {}) {
     }
 
     if (!transient || attemptNumber === maxAttempts) return response;
+
+    if (canUseFastFallback) {
+      logEvent('opendota', 'switch_provider', {
+        method,
+        path,
+        status: response.status,
+        provider: 'stratz'
+      });
+      return response;
+    }
+
+    const configuredDelay = OPENDOTA_RETRY_DELAYS_MS[index + 1] || 30_000;
+    const retryAfterMs = retryAfterFromResponse(response, '', 0) * 1000;
+    nextDelayMs = Math.max(configuredDelay, retryAfterMs);
   }
 
   throw new RetryableProviderError('OpenDota временно недоступна.', 300);
@@ -219,9 +332,10 @@ async function fetchMatch() {
   const response = await openDota(`/matches/${matchId}`);
   if (response.status === 404) return null;
   if (!response.ok) {
+    const body = await response.clone().text().catch(() => '');
     throw new RetryableProviderError(
       `OpenDota вернула HTTP ${response.status}${responseSuffix(response)}.`,
-      300
+      retryAfterFromResponse(response, body, 300)
     );
   }
   const match = await response.json().catch(() => null);
@@ -232,11 +346,32 @@ async function fetchMatch() {
 async function requestParse() {
   const response = await openDota(`/request/${matchId}`, { method: 'POST' });
   if (![200, 202, 409].includes(response.status)) {
+    const body = await response.clone().text().catch(() => '');
     throw new RetryableProviderError(
       `OpenDota не приняла запрос разбора: HTTP ${response.status}${responseSuffix(response)}.`,
-      300
+      retryAfterFromResponse(response, body, 300)
     );
   }
+}
+
+async function fetchMatchWithFallback() {
+  let openDotaError = null;
+
+  try {
+    const match = await fetchMatch();
+    if (match) return match;
+  } catch (error) {
+    openDotaError = error;
+    logEvent('verification', 'opendota_failed', {
+      fallback: Boolean(stratzToken),
+      ...errorDetails(error)
+    });
+  }
+
+  const stratzMatch = await fetchStratzMatch();
+  if (stratzMatch) return stratzMatch;
+  if (openDotaError) throw openDotaError;
+  return null;
 }
 
 function compactPlayer(player) {
@@ -292,16 +427,29 @@ function compactMatch(match) {
 }
 
 async function obtainVerifiableMatch() {
-  let match = await fetchMatch();
+  let match = await fetchMatchWithFallback();
   if (match) {
     const basicProof = verifyMatch({ match, attempt, accountId });
     if (basicProof.parsed) return match;
   }
 
-  await requestParse();
+  if (match?.ranked_data_source === 'stratz') {
+    logEvent('verification', 'parse_request_skipped', { provider: 'stratz' });
+  } else {
+    try {
+      await requestParse();
+    } catch (error) {
+      if (!stratzToken) throw error;
+      logEvent('verification', 'parse_request_failed', {
+        fallback: 'stratz polling',
+        ...errorDetails(error)
+      });
+    }
+  }
+
   for (const delay of POLL_DELAYS_MS) {
     await sleep(delay);
-    match = await fetchMatch();
+    match = await fetchMatchWithFallback();
     if (!match) continue;
     const proof = verifyMatch({ match, attempt, accountId });
     if (proof.parsed) return match;
@@ -322,14 +470,18 @@ await callback({ status: 'running', message: 'GitHub Actions получила з
 
 try {
   const match = await obtainVerifiableMatch();
+  const source = match?.ranked_data_source === 'stratz'
+    ? 'github-actions-stratz'
+    : 'github-actions-opendota';
   logEvent('verification', 'completed', {
     matchId,
+    source,
     duration: match.duration,
     players: Array.isArray(match.players) ? match.players.length : 0
   });
   await callback({
     status: 'completed',
-    source: 'github-actions-opendota',
+    source,
     match: compactMatch(match)
   });
 } catch (error) {
