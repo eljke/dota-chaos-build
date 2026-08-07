@@ -1,0 +1,51 @@
+name: Verify ranked match
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Verification job UUID
+        required: true
+        type: string
+      match_id:
+        description: Dota match ID
+        required: true
+        type: string
+      account_id:
+        description: Steam account32 ID
+        required: true
+        type: string
+      attempt_payload:
+        description: Trusted attempt snapshot from Worker
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ranked-verification-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fetch and verify OpenDota match
+        env:
+          INPUT_JOB_ID: ${{ inputs.job_id }}
+          INPUT_MATCH_ID: ${{ inputs.match_id }}
+          INPUT_ACCOUNT_ID: ${{ inputs.account_id }}
+          INPUT_ATTEMPT_PAYLOAD: ${{ inputs.attempt_payload }}
+          VERIFICATION_CALLBACK_URL: ${{ secrets.VERIFICATION_CALLBACK_URL }}
+          VERIFICATION_CALLBACK_SECRET: ${{ secrets.VERIFICATION_CALLBACK_SECRET }}
+        run: node scripts/verify-ranked-match.mjs

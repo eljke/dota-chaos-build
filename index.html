@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.6.1">
+  <link rel="stylesheet" href="styles.css?v=1.7.0">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -196,7 +196,7 @@
       <div>
         <span class="ranked-kicker">SERVER-VERIFIED CHALLENGE</span>
         <h1 id="rankedTitle">Ranked без частичных замков</h1>
-        <p>Герой, все шесть предметов и модификатор выдаются сервером. Любой реролл меняет сборку целиком, а OpenDota проверяет результат матча.</p>
+        <p>Герой, шесть предметов и модификатор выдаются сервером. Любой реролл меняет сборку целиком, а GitHub Actions проверяет матч; неполная сборка получает меньше очков.</p>
       </div>
       <div class="ranked-rule-chips" aria-label="Анти-абуз правила">
         <span>СБОРКА АКТИВНА СРАЗУ</span><span>ТОЛЬКО ПОЛНЫЙ РЕРОЛЛ</span><span>ОТМЕНА СО ШТРАФОМ</span>
@@ -238,7 +238,7 @@
             <div class="ranked-metrics">
               <span><small>ПОЛНЫЕ РЕРОЛЛЫ</small><b id="rankedRerolls">0</b></span>
               <span><small>ШТРАФЫ ОТМЕНЫ</small><b id="rankedCancelPenalties">0</b></span>
-              <span class="ranked-score"><small>ОЧКИ ЗА ПОБЕДУ</small><b id="rankedScore">1000</b></span>
+              <span class="ranked-score"><small>МАКС. ОЧКИ ЗА ПОБЕДУ</small><b id="rankedScore">1000</b></span>
             </div>
           </div>
 
@@ -322,12 +322,21 @@
     </div>
     <div class="release-notes">
       <article>
+        <header><h3>1.7.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
+        <ul>
+          <li>Проверка ranked-матчей вынесена в GitHub Actions: Cloudflare Worker больше не расходует общий анонимный лимит OpenDota.</li>
+          <li>Статус проверки обновляется автоматически; попытка сохраняется при временном лимите или незавершённом разборе реплея.</li>
+          <li>Неполная сборка засчитывается с экспоненциальным снижением: ×0,6 за каждый отсутствующий предмет.</li>
+          <li>Улучшенные предметы засчитываются за исходные компоненты, например Parasma — за Witch Blade.</li>
+        </ul>
+      </article>
+      <article>
         <header><h3>1.6.1</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Добавили серверный кэш матчей и защиту от повторных запросов разбора, чтобы экономить бесплатный лимит OpenDota.</li>
-          <li>При ограничении OpenDota Worker может переключиться на бесплатный резерв STRATZ.</li>
+          <li>При ограничении OpenDota Worker мог переключиться на бесплатный резерв STRATZ.</li>
           <li>Кнопка подтверждения получила серверный кулдаун: повторные клики и несколько вкладок не спамят внешние API.</li>
-          <li>Неверный герой, поражение и слишком ранний старт отклоняются до дорогого разбора реплея; покупки проверяются через OpenDota или STRATZ.</li>
+          <li>Неверный герой, поражение и слишком ранний старт отклоняются до дорогого разбора реплея.</li>
         </ul>
       </article>
       <article>
@@ -382,6 +391,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.6.1"></script>
+  <script type="module" src="app.js?v=1.7.0"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 import { generateBuild, pick, seededRandom } from './js/generator.js';
 import { decodeBuildCode, encodeBuildCode } from './js/build-code.js';
 import { MODIFIERS as CONTRACTS } from './js/modifiers.js';
-import { initRanked } from './js/ranked-client.js?v=1.6.1';
+import { initRanked } from './js/ranked-client.js?v=1.7.0';
 import {
   BOOT_KEYS, BOOT_KEY_SET, ITEM_KEY_ALIASES, ITEM_POOL_KEYS,
   MELEE_ONLY, RANGED_ONLY, isItemCompatible

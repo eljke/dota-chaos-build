@@ -2,13 +2,39 @@ import { modifierById } from '../../js/modifiers.js';
 
 const NORMAL_GAME_MODES = new Set([1, 2, 3, 4, 5, 12, 16, 17, 22]);
 const PUBLIC_LOBBIES = new Set([0, 5, 6, 7, 9]);
+const MISSING_ITEM_FACTOR = 0.6;
+
+function numericSet(values) {
+  return new Set((Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite));
+}
+
+function stringSet(values) {
+  return new Set((Array.isArray(values) ? values : [])
+    .filter(value => typeof value === 'string' && value.length > 0)
+    .map(String));
+}
+
+
+function itemCandidateIds(item) {
+  return numericSet([item?.id, ...(Array.isArray(item?.upgradeIds) ? item.upgradeIds : [])]);
+}
+
+function itemCandidateKeys(item) {
+  return stringSet([
+    item?.key,
+    item?.sourceKey,
+    ...(Array.isArray(item?.upgradeKeys) ? item.upgradeKeys : [])
+  ]);
+}
+
+function entryMatchesItem(entry, item) {
+  const ids = itemCandidateIds(item);
+  const keys = itemCandidateKeys(item);
+  return keys.has(String(entry?.key || '')) || ids.has(Number(entry?.id ?? entry?.item_id));
+}
 
 function firstPurchaseIndex(purchaseLog, item) {
-  return purchaseLog.findIndex(entry =>
-    entry?.key === item.key
-    || entry?.key === item.sourceKey
-    || Number(entry?.id ?? entry?.item_id) === Number(item.id)
-  );
+  return purchaseLog.findIndex(entry => entryMatchesItem(entry, item));
 }
 
 function countById(record, id) {
@@ -28,10 +54,58 @@ function useCount(player, key, id) {
   return Number(player.item_uses?.[key] || 0) || countById(player.item_uses_by_id, id);
 }
 
-export function calculateScore({ rerolls, cancelPenalties = 0, orderRequired, modifierMultiplier = 1 }) {
+function finalItemAssignment(items, finalIds) {
+  const slotOwner = Array(finalIds.length).fill(-1);
+  const assignedSlot = Array(items.length).fill(-1);
+  const candidates = items.map(item => {
+    const ids = itemCandidateIds(item);
+    return finalIds
+      .map((id, slot) => ({ id, slot, exact: Number(id) === Number(item?.id) }))
+      .filter(entry => entry.id > 0 && ids.has(entry.id))
+      .sort((a, b) => Number(b.exact) - Number(a.exact));
+  });
+
+  const order = items
+    .map((_, index) => index)
+    .sort((a, b) => candidates[a].length - candidates[b].length);
+
+  function assign(itemIndex, seenSlots) {
+    for (const candidate of candidates[itemIndex]) {
+      if (seenSlots.has(candidate.slot)) continue;
+      seenSlots.add(candidate.slot);
+      const previousOwner = slotOwner[candidate.slot];
+      if (previousOwner === -1 || assign(previousOwner, seenSlots)) {
+        slotOwner[candidate.slot] = itemIndex;
+        assignedSlot[itemIndex] = candidate.slot;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (const itemIndex of order) assign(itemIndex, new Set());
+  return assignedSlot;
+}
+
+export function completionMultiplier(completedItems, totalItems = 6) {
+  const total = Math.max(1, Number(totalItems) || 1);
+  const completed = Math.max(0, Math.min(total, Number(completedItems) || 0));
+  if (completed === 0) return 0;
+  return MISSING_ITEM_FACTOR ** (total - completed);
+}
+
+export function calculateScore({
+  rerolls,
+  cancelPenalties = 0,
+  orderRequired,
+  modifierMultiplier = 1,
+  completedItems = 6,
+  totalItems = 6
+}) {
   const orderMultiplier = orderRequired ? 1.2 : 1;
   const penaltyDivisor = Number(rerolls) + Number(cancelPenalties) + 1;
-  return Math.round(1000 * modifierMultiplier * orderMultiplier / penaltyDivisor);
+  const buildMultiplier = completionMultiplier(completedItems, totalItems);
+  return Math.round(1000 * modifierMultiplier * orderMultiplier * buildMultiplier / penaltyDivisor);
 }
 
 export function verifyModifier({ modifierId, match, player, attempt }) {
@@ -39,9 +113,7 @@ export function verifyModifier({ modifierId, match, player, attempt }) {
   if (!modifier) return { ok: !modifierId, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };
 
   const turbo = attempt.mode === 'turbo';
-  const purchases = player.purchase || {};
-  const uses = player.item_uses || {};
-  const log = player.purchase_log;
+  const log = Array.isArray(player.purchase_log) ? player.purchase_log : [];
   const teamKills = Number(player.player_slot) < 128 ? Number(match.radiant_score) : Number(match.dire_score);
   const participation = teamKills > 0 ? (Number(player.kills) + Number(player.assists)) / teamKills : 0;
   const kda = (Number(player.kills) + Number(player.assists)) / Math.max(1, Number(player.deaths));
@@ -71,14 +143,21 @@ export function verifyModifier({ modifierId, match, player, attempt }) {
     }
     case 'shard-before-luxury': {
       const shard = log.findIndex(entry => entry?.key === 'aghanims_shard' || Number(entry?.id ?? entry?.item_id) === 609);
-      const luxury = Math.min(...attempt.items.filter(item => Number(item.cost) >= 5000).map(item => firstPurchaseIndex(log, item)).filter(index => index >= 0));
+      const luxury = Math.min(...attempt.items
+        .filter(item => Number(item.cost) >= 5000)
+        .map(item => firstPurchaseIndex(log, item))
+        .filter(index => index >= 0));
       value = { shard, firstLuxury: luxury };
       ok = shard >= 0 && Number.isFinite(luxury) && shard < luxury;
       break;
     }
   }
 
-  return { ok, error: ok ? null : `Не выполнен модификатор «${modifier.name}»: ${modifier.description}`, evidence: { id: modifier.id, value } };
+  return {
+    ok,
+    error: ok ? null : `Не выполнен модификатор «${modifier.name}»: ${modifier.description}`,
+    evidence: { id: modifier.id, value }
+  };
 }
 
 export function verifyMatch({ match, attempt, accountId }) {
@@ -119,38 +198,63 @@ export function verifyMatch({ match, attempt, accountId }) {
     return { ok: false, parsed: false, errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
   }
 
+  const items = Array.isArray(attempt.items) ? attempt.items : [];
   const purchaseLog = player.purchase_log;
-  const purchaseIndices = attempt.items.map(item => firstPurchaseIndex(purchaseLog, item));
+  const purchaseIndices = items.map(item => firstPurchaseIndex(purchaseLog, item));
   const finalIds = [
     player.item_0, player.item_1, player.item_2, player.item_3, player.item_4, player.item_5,
     player.backpack_0, player.backpack_1, player.backpack_2
   ].map(Number);
+  const assignedSlots = finalItemAssignment(items, finalIds);
+  const matchedItems = items.map((item, index) => ({
+    id: Number(item.id),
+    name: item.name,
+    purchaseIndex: purchaseIndices[index],
+    finalSlot: assignedSlots[index],
+    finalItemId: assignedSlots[index] >= 0 ? finalIds[assignedSlots[index]] : null,
+    upgraded: assignedSlots[index] >= 0 && finalIds[assignedSlots[index]] !== Number(item.id),
+    matched: purchaseIndices[index] >= 0 && assignedSlots[index] >= 0
+  }));
+  const completedItems = matchedItems.filter(item => item.matched).length;
 
-  attempt.items.forEach((item, index) => {
-    if (purchaseIndices[index] < 0) errors.push(`Не подтверждена покупка ${item.name}.`);
-    if (!finalIds.includes(Number(item.id))) errors.push(`${item.name} отсутствует в финальном инвентаре или backpack.`);
-  });
+  if (completedItems === 0) errors.push('Не подтверждён ни один предмет из выданной сборки.');
 
   const purchases = new Set(purchaseLog.map(entry => entry?.key));
   const purchaseIds = new Set(purchaseLog.map(entry => Number(entry?.id ?? entry?.item_id)));
   if (!purchases.has('ultimate_scepter') && !purchaseIds.has(108)) errors.push("Не подтверждена покупка Aghanim's Scepter.");
   if (!purchases.has('aghanims_shard') && !purchaseIds.has(609)) errors.push("Не подтверждена покупка Aghanim's Shard.");
 
-  if (attempt.order_required && purchaseIndices.some((value, index) => index > 0 && value <= purchaseIndices[index - 1])) {
-    errors.push('Предметы завершены не в выданном порядке.');
+  if (attempt.order_required) {
+    let previousIndex = -1;
+    for (const item of matchedItems) {
+      if (!item.matched) continue;
+      if (item.purchaseIndex <= previousIndex) {
+        errors.push('Подтверждённые предметы завершены не в выданном порядке.');
+        break;
+      }
+      previousIndex = item.purchaseIndex;
+    }
   }
 
   const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
   if (!modifierProof.ok && modifierProof.error) errors.push(modifierProof.error);
 
+  const totalItems = items.length || 6;
   return {
     ok: errors.length === 0,
     parsed: true,
     errors,
     player,
+    completedItems,
+    totalItems,
+    completionMultiplier: completionMultiplier(completedItems, totalItems),
     evidence: {
       ...basicEvidence,
-      purchaseIndices,
+      completedItems,
+      totalItems,
+      completionMultiplier: completionMultiplier(completedItems, totalItems),
+      matchedItems,
+      missingItems: matchedItems.filter(item => !item.matched).map(item => ({ id: item.id, name: item.name })),
       finalItemIds: finalIds,
       modifier: modifierProof.evidence
     }

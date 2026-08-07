@@ -53,6 +53,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   let busy = false;
   let cooldownUntil = 0;
   let verificationRetryUntil = 0;
+  let verificationJob = null;
+  let verificationPollTimer = null;
   let countdownTimer = null;
 
   function setView(view) {
@@ -82,6 +84,82 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   function setStatus(message, kind = '') {
     ui.status.textContent = message;
     ui.status.dataset.kind = kind;
+  }
+
+  function verificationIsActive() {
+    return ['queued', 'running'].includes(verificationJob?.status);
+  }
+
+  function stopVerificationPolling() {
+    if (verificationPollTimer) clearTimeout(verificationPollTimer);
+    verificationPollTimer = null;
+  }
+
+  function scheduleVerificationPolling(seconds = 5) {
+    stopVerificationPolling();
+    if (!attempt || !verificationIsActive()) return;
+    verificationPollTimer = setTimeout(pollVerification, Math.max(2, Number(seconds) || 5) * 1000);
+  }
+
+  async function applyVerificationStatus(data) {
+    const status = String(data?.status || 'idle');
+    verificationJob = status === 'idle' ? null : data;
+
+    if (status === 'idle') {
+      stopVerificationPolling();
+      return;
+    }
+
+    if (status === 'queued' || status === 'running') {
+      verificationRetryUntil = 0;
+      setStatus(data.message || (status === 'queued'
+        ? 'Матч ожидает свободный GitHub Actions runner.'
+        : 'GitHub Actions проверяет матч и сборку.'));
+      render();
+      scheduleVerificationPolling(data.retryAfter || 5);
+      return;
+    }
+
+    stopVerificationPolling();
+    const retryAfter = Math.max(0, Number(data.retryAfter || 0));
+    verificationRetryUntil = retryAfter > 0 ? nowSeconds() + retryAfter : 0;
+
+    if (status === 'verified') {
+      const result = data.result || {};
+      const score = Number(result.score || 0);
+      const completed = Number(result.completedItems || 0);
+      const total = Number(result.totalItems || 6);
+      setStatus(`Победа подтверждена: +${score.toLocaleString('ru-RU')} очков · собрано ${completed}/${total} предметов.`, 'ok');
+      onMessage(`Ranked-победа подтверждена: +${score}`);
+      attempt = null;
+      verificationJob = null;
+      verificationRetryUntil = 0;
+      ui.match.value = '';
+      render();
+      await loadLeaderboard();
+      return;
+    }
+
+    if (status === 'rejected') {
+      const errors = Array.isArray(data.result?.errors) ? data.result.errors.join(' ') : '';
+      setStatus(errors || data.message || 'Матч не прошёл проверку.', 'error');
+    } else if (status === 'retry') {
+      setStatus(data.message || 'Источник матча временно недоступен. Попытка сохранена.');
+    } else {
+      setStatus(data.message || 'Серверная проверка не завершилась. Попытка сохранена.', 'error');
+    }
+    render();
+  }
+
+  async function pollVerification() {
+    if (!attempt || !verificationIsActive()) return;
+    try {
+      const data = await request(`/attempts/${attempt.id}/verification`);
+      await applyVerificationStatus(data);
+    } catch (error) {
+      setStatus(error.message || 'Не удалось получить статус проверки. Повторяем…', 'error');
+      scheduleVerificationPolling(10);
+    }
   }
 
   function renderUser() {
@@ -134,7 +212,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.modifierName.textContent = attempt.modifier?.name || 'Победа со сборкой';
     const order = attempt.orderRequired ? ' Предметы необходимо завершить слева направо.' : '';
     const bonus = attempt.modifier ? ` Множитель: ×${Number(attempt.modifier.multiplier || 1).toFixed(2)}.` : '';
-    ui.modifierDescription.textContent = `${attempt.modifier?.description || 'Соберите все предметы, Аганим и шард.'}${order}${bonus}`;
+    const partial = ' Неполная сборка тоже засчитывается, но каждый отсутствующий предмет умножает очки на 0,6. Апгрейд предмета засчитывается за исходный предмет.';
+    ui.modifierDescription.textContent = `${attempt.modifier?.description || 'Победите с выданным героем, Аганимом и шардом.'}${order}${bonus}${partial}`;
     ui.cancelPenaltyText.textContent = `Отмена добавит ещё ${attempt.cancelCost || 1} виртуальный реролл к следующей попытке этого режима и включит короткий кулдаун.`;
     renderItems();
     renderEligibility();
@@ -147,12 +226,17 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.start.textContent = cooldown > 0 ? `ДОСТУПНО ЧЕРЕЗ ${formatCountdown(cooldown)}` : 'НАЧАТЬ ПОПЫТКУ';
     ui.mode.disabled = busy || Boolean(attempt);
     ui.order.disabled = busy || Boolean(attempt);
-    ui.reroll.disabled = busy || !attempt;
-    ui.cancel.disabled = busy || !attempt;
+    const verificationActive = verificationIsActive();
+    ui.reroll.disabled = busy || !attempt || verificationActive;
+    ui.cancel.disabled = busy || !attempt || verificationActive;
     const verificationWait = Math.max(0, verificationRetryUntil - nowSeconds());
-    ui.submit.disabled = busy || !attempt || verificationWait > 0;
-    ui.submit.textContent = verificationWait > 0 ? `ПОВТОРИТЬ ЧЕРЕЗ ${formatCountdown(verificationWait)}` : 'ПРОВЕРИТЬ ПОБЕДУ';
-    ui.match.disabled = busy || !attempt;
+    ui.submit.disabled = busy || !attempt || verificationActive || verificationWait > 0;
+    ui.submit.textContent = verificationActive
+      ? 'СЕРВЕРНАЯ ПРОВЕРКА…'
+      : verificationWait > 0
+        ? `ПОВТОРИТЬ ЧЕРЕЗ ${formatCountdown(verificationWait)}`
+        : 'ПРОВЕРИТЬ ПОБЕДУ';
+    ui.match.disabled = busy || !attempt || verificationActive;
     renderUser();
     renderAttempt();
   }
@@ -215,6 +299,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     user = null;
     attempt = null;
     verificationRetryUntil = 0;
+    verificationJob = null;
+    stopVerificationPolling();
     setStatus('Вы вышли из ranked.');
     render();
   });
@@ -225,12 +311,16 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       body: JSON.stringify({ mode: ui.mode.value, orderRequired: ui.order.checked })
     });
     attempt = data.attempt;
+    verificationJob = null;
+    stopVerificationPolling();
     verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
     setStatus('Сборка активирована сервером. Частичных замков в ranked нет.', 'ok');
   }, 'Сервер выбирает героя и сборку…'));
   ui.reroll.addEventListener('click', () => action(async () => {
     const data = await request(`/attempts/${attempt.id}/reroll`, { method: 'POST', body: '{}' });
     attempt = data.attempt;
+    verificationJob = null;
+    stopVerificationPolling();
     verificationRetryUntil = 0;
     setStatus('Вся сборка переброшена. Штраф и новое защитное окно уже учтены.', 'ok');
   }, 'Перебрасываем всю сборку…'));
@@ -246,6 +336,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       const data = await request(`/attempts/${attempt.id}/cancel`, { method: 'POST', body: '{}' });
       cooldownUntil = Number(data.cooldownUntil || 0);
       attempt = null;
+      verificationJob = null;
+      stopVerificationPolling();
       verificationRetryUntil = 0;
       ui.match.value = '';
       setStatus(`Попытка отменена. Накопленный штраф отмен: ${data.cancelPenalties}.`, 'ok');
@@ -256,19 +348,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       method: 'POST',
       body: JSON.stringify({ matchId: ui.match.value.trim() })
     });
-    if (data.status === 'parsing' || data.status === 'waiting_provider') {
-      verificationRetryUntil = nowSeconds() + Number(data.retryAfter || 60);
-      setStatus(data.message || 'Матч ожидает серверной проверки. Повторите позже.');
-      return;
-    }
-    verificationRetryUntil = 0;
-    const source = data.source === 'stratz' ? ' · резерв STRATZ' : '';
-    setStatus(`Победа подтверждена: +${data.score} очков${source}.`, 'ok');
-    onMessage(`Ranked-победа подтверждена: +${data.score}`);
-    attempt = null;
-    ui.match.value = '';
-    await loadLeaderboard();
-  }, 'Проверяем матч и инвентарь…'));
+    await applyVerificationStatus(data);
+  }, 'Ставим матч в очередь серверной проверки…'));
 
   const code = new URL(location.href).searchParams.get('steam_code');
   setView(code ? 'ranked' : localStorage.getItem(VIEW_KEY));
@@ -293,6 +374,10 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       if (!user) throw new Error('Сессия закончилась.');
       ({ attempt } = await request('/attempts/active'));
       verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
+      if (attempt) {
+        const verification = await request(`/attempts/${attempt.id}/verification`);
+        await applyVerificationStatus(verification);
+      }
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       token = '';
@@ -304,7 +389,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   clearInterval(countdownTimer);
   countdownTimer = setInterval(() => {
     renderEligibility();
-    if (cooldownUntil > 0 || verificationRetryUntil > 0) renderControls();
+    if (cooldownUntil > 0 || verificationRetryUntil > 0 || verificationIsActive()) renderControls();
   }, 1000);
   render();
   await loadLeaderboard();

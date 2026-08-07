@@ -103,6 +103,36 @@ async function constantsMetadata() {
   }
 }
 
+
+function buildUpgradeGraph(items) {
+  const direct = new Map();
+  for (const [upgradeKey, item] of Object.entries(items)) {
+    if (!item?.id || !Array.isArray(item.components)) continue;
+    for (const componentKey of item.components) {
+      if (!direct.has(componentKey)) direct.set(componentKey, new Set());
+      direct.get(componentKey).add(upgradeKey);
+    }
+  }
+
+  const memo = new Map();
+  function descendants(key, visiting = new Set()) {
+    if (memo.has(key)) return memo.get(key);
+    if (visiting.has(key)) return new Set();
+    const nextVisiting = new Set(visiting).add(key);
+    const result = new Set();
+    for (const child of direct.get(key) || []) {
+      result.add(child);
+      for (const nested of descendants(child, nextVisiting)) result.add(nested);
+    }
+    memo.set(key, result);
+    return result;
+  }
+
+  return key => [...descendants(key)]
+    .map(upgradeKey => ({ key: upgradeKey, id: Number(items[upgradeKey]?.id) }))
+    .filter(entry => entry.id > 0);
+}
+
 async function syncConstants() {
   try {
     const [heroesText, itemsText] = await Promise.all([
@@ -111,17 +141,21 @@ async function syncConstants() {
     ]);
     const heroes = JSON.parse(heroesText);
     const items = JSON.parse(itemsText);
+    const upgradesFor = buildUpgradeGraph(items);
     const rankedItems = [...new Set([...ITEM_POOL_KEYS, ...BOOT_KEYS, 'rapier'])]
       .map(key => {
         const sourceKey = ITEM_KEY_ALIASES[key] || key;
         const item = items[sourceKey];
         if (!item?.id || !item?.img) return null;
+        const upgrades = upgradesFor(sourceKey);
         return {
           id: Number(item.id),
           key,
           sourceKey,
           name: item.dname || key,
-          cost: Number(item.cost) || 0
+          cost: Number(item.cost) || 0,
+          upgradeIds: upgrades.map(entry => entry.id),
+          upgradeKeys: upgrades.map(entry => entry.key)
         };
       })
       .filter(Boolean);

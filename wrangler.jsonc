@@ -8,7 +8,9 @@
   "vars": {
     "SITE_ORIGIN": "https://eljke.github.io",
     "SITE_URL": "https://eljke.github.io/dota-chaos-build/",
-    "OPENDOTA_API": "https://api.opendota.com/api"
+    "GITHUB_REPOSITORY": "eljke/dota-chaos-build",
+    "GITHUB_WORKFLOW_FILE": "verify-ranked-match.yml",
+    "GITHUB_WORKFLOW_REF": "master"
   },
   "d1_databases": [
     {

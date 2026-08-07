@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateScore, verifyMatch } from '../worker/src/verify.js';
+import { calculateScore, completionMultiplier, verifyMatch } from '../worker/src/verify.js';
 
 const items = [
   { id: 50, key: 'phase_boots', sourceKey: 'phase_boots', name: 'Phase Boots' },
@@ -68,4 +68,86 @@ test('match must start after the anti-abuse guard window', () => {
   const result = verifyMatch({ match: { ...match, start_time: 1299 }, attempt: guarded, accountId: 42 });
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(error => error.includes('слишком рано')));
+});
+
+
+test('partial build receives an exponential score reduction', () => {
+  const partialItems = Array.from({ length: 6 }, (_, index) => ({
+    id: 100 + index,
+    key: `item_${index}`,
+    sourceKey: `item_${index}`,
+    name: `Item ${index + 1}`
+  }));
+  const partialAttempt = { ...attempt, order_required: 0, items: partialItems };
+  const partialMatch = structuredClone(match);
+  partialMatch.players[0].purchase_log = [
+    { key: 'item_0' }, { key: 'item_1' }, { key: 'item_2' },
+    { key: 'ultimate_scepter' }, { key: 'aghanims_shard' }
+  ];
+  Object.assign(partialMatch.players[0], {
+    item_0: 100, item_1: 101, item_2: 102,
+    item_3: 0, item_4: 0, item_5: 0,
+    backpack_0: 0, backpack_1: 0, backpack_2: 0
+  });
+
+  const result = verifyMatch({ match: partialMatch, attempt: partialAttempt, accountId: 42 });
+  assert.equal(result.ok, true);
+  assert.equal(result.completedItems, 3);
+  assert.equal(result.totalItems, 6);
+  assert.ok(Math.abs(result.completionMultiplier - 0.216) < 1e-12);
+  assert.equal(completionMultiplier(5, 6), 0.6);
+  assert.equal(calculateScore({ rerolls: 0, orderRequired: false, completedItems: 3, totalItems: 6 }), 216);
+});
+
+test('an upgraded item counts for its original build component', () => {
+  const upgradedAttempt = {
+    ...attempt,
+    order_required: 0,
+    items: [{
+      id: 534,
+      key: 'witch_blade',
+      sourceKey: 'witch_blade',
+      name: 'Witch Blade',
+      upgradeIds: [1806],
+      upgradeKeys: ['devastator']
+    }]
+  };
+  const upgradedMatch = structuredClone(match);
+  upgradedMatch.players[0].purchase_log = [
+    { key: 'devastator', id: 1806 },
+    { key: 'ultimate_scepter', id: 108 },
+    { key: 'aghanims_shard', id: 609 }
+  ];
+  Object.assign(upgradedMatch.players[0], {
+    item_0: 1806, item_1: 0, item_2: 0, item_3: 0, item_4: 0, item_5: 0
+  });
+
+  const result = verifyMatch({ match: upgradedMatch, attempt: upgradedAttempt, accountId: 42 });
+  assert.equal(result.ok, true);
+  assert.equal(result.completedItems, 1);
+  assert.equal(result.evidence.matchedItems[0].upgraded, true);
+  assert.equal(result.evidence.matchedItems[0].finalItemId, 1806);
+});
+
+test('one final upgraded item cannot satisfy two build slots', () => {
+  const sharedUpgradeAttempt = {
+    ...attempt,
+    order_required: 0,
+    items: [
+      { id: 534, key: 'witch_blade', sourceKey: 'witch_blade', name: 'Witch Blade', upgradeIds: [1806], upgradeKeys: ['devastator'] },
+      { id: 57, key: 'mystic_staff', sourceKey: 'mystic_staff', name: 'Mystic Staff', upgradeIds: [1806], upgradeKeys: ['devastator'] }
+    ]
+  };
+  const sharedUpgradeMatch = structuredClone(match);
+  sharedUpgradeMatch.players[0].purchase_log = [
+    { key: 'witch_blade', id: 534 }, { key: 'mystic_staff', id: 57 }, { key: 'devastator', id: 1806 },
+    { key: 'ultimate_scepter', id: 108 }, { key: 'aghanims_shard', id: 609 }
+  ];
+  Object.assign(sharedUpgradeMatch.players[0], {
+    item_0: 1806, item_1: 0, item_2: 0, item_3: 0, item_4: 0, item_5: 0
+  });
+
+  const result = verifyMatch({ match: sharedUpgradeMatch, attempt: sharedUpgradeAttempt, accountId: 42 });
+  assert.equal(result.ok, true);
+  assert.equal(result.completedItems, 1);
 });
