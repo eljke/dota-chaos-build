@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, dota-verifier]
     timeout-minutes: 12
     steps:
       - name: Checkout
@@ -48,4 +48,5 @@ jobs:
           INPUT_ATTEMPT_PAYLOAD: ${{ inputs.attempt_payload }}
           VERIFICATION_CALLBACK_URL: ${{ secrets.VERIFICATION_CALLBACK_URL }}
           VERIFICATION_CALLBACK_SECRET: ${{ secrets.VERIFICATION_CALLBACK_SECRET }}
+          STRATZ_API_TOKEN: ${{ secrets.STRATZ_API_TOKEN }}
         run: node scripts/verify-ranked-match.mjs
