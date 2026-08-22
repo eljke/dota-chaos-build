@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.7.0">
+  <link rel="stylesheet" href="styles.css?v=1.7.1">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -322,6 +322,12 @@
     </div>
     <div class="release-notes">
       <article>
+        <header><h3>1.7.1</h3><time datetime="2026-08-22">22 августа 2026</time></header>
+        <ul>
+          <li>Проверка автоматически переключается на резервный STRATZ, если OpenDota ещё не разобрала реплей.</li>
+        </ul>
+      </article>
+      <article>
         <header><h3>1.7.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Проверка ranked-матчей вынесена в GitHub Actions: Cloudflare Worker больше не расходует общий анонимный лимит OpenDota.</li>
@@ -391,6 +397,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.7.0"></script>
+  <script type="module" src="app.js?v=1.7.1"></script>
 </body>
 </html>
