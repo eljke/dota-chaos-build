@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.7.6">
+  <link rel="stylesheet" href="styles.css?v=1.7.7">
   <script type="application/ld+json">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -274,7 +274,13 @@
       </div>
 
       <aside class="ranked-board dota-panel">
-        <div class="ranked-board-head"><div><span>TOP 50</span><h2>ЛИДЕРБОРД</h2></div><i>10 лучших побед</i></div>
+        <div class="ranked-board-head">
+          <div><span>TOP 50</span><h2>ЛИДЕРБОРД</h2></div>
+          <div class="ranked-board-switch" role="group" aria-label="Режим лидерборда">
+            <button class="is-active" type="button" data-ranked-board-mode="normal" aria-pressed="true">Normal</button>
+            <button type="button" data-ranked-board-mode="turbo" aria-pressed="false">Turbo</button>
+          </div>
+        </div>
         <p>Normal и Turbo считаются отдельно. При равенстве выше игрок с меньшим суммарным штрафом.</p>
         <ol id="rankedLeaderboard"><li class="ranked-empty">Загрузка…</li></ol>
       </aside>
@@ -321,6 +327,13 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>1.7.7</h3><time datetime="2026-08-23">23 августа 2026</time></header>
+        <ul>
+          <li>Добавлен отдельный переключатель Normal / Turbo для лидерборда.</li>
+          <li>После перезагрузки лидерборд открывается в режиме активной ranked-попытки.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>1.7.6</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
@@ -427,6 +440,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.7.6"></script>
+  <script type="module" src="app.js?v=1.7.7"></script>
 </body>
 </html>

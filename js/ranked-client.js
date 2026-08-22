@@ -42,7 +42,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     eligibility: el('#rankedEligibility'), eligibilityTime: el('#rankedEligibilityTime'),
     reroll: el('#rankedRerollButton'), cancel: el('#rankedCancelButton'),
     match: el('#rankedMatchId'), submit: el('#rankedSubmitButton'), status: el('#rankedStatus'),
-    board: el('#rankedLeaderboard'),
+    board: el('#rankedLeaderboard'), boardModes: [...document.querySelectorAll('[data-ranked-board-mode]')],
     cancelDialog: el('#rankedCancelDialog'), cancelPenaltyText: el('#rankedCancelPenaltyText'),
     cancelClose: el('#rankedCancelClose'), cancelKeep: el('#rankedCancelKeep'), cancelConfirm: el('#rankedCancelConfirm')
   };
@@ -56,6 +56,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   let verificationJob = null;
   let verificationPollTimer = null;
   let countdownTimer = null;
+  let leaderboardMode = 'normal';
 
   function setView(view) {
     const target = view === 'ranked' ? 'ranked' : 'random';
@@ -202,6 +203,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.setup.hidden = Boolean(attempt);
     if (!attempt) return;
 
+    ui.mode.value = attempt.mode;
     ui.heroImage.src = heroImage(attempt.hero.key);
     ui.heroImage.alt = attempt.hero.name;
     ui.heroName.textContent = attempt.hero.name;
@@ -213,7 +215,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     const order = attempt.orderRequired ? ' Предметы необходимо завершить слева направо.' : '';
     const bonus = attempt.modifier ? ` Множитель: ×${Number(attempt.modifier.multiplier || 1).toFixed(2)}.` : '';
     const partial = ' Неполная сборка тоже засчитывается, но каждый отсутствующий предмет умножает очки на 0,6. Апгрейд предмета засчитывается за исходный предмет.';
-    ui.modifierDescription.textContent = `${attempt.modifier?.description || 'Победите с выданным героем, Аганимом и шардом.'}${order}${bonus}${partial}`;
+    ui.modifierDescription.textContent = `${attempt.modifier?.description || 'Победите с выданным героем и сборкой.'}${order}${bonus}${partial}`;
     ui.cancelPenaltyText.textContent = `Отмена добавит ещё ${attempt.cancelCost || 1} виртуальный реролл к следующей попытке этого режима и включит короткий кулдаун.`;
     renderItems();
     renderEligibility();
@@ -243,12 +245,17 @@ export async function initRanked({ onMessage = () => {} } = {}) {
 
   function render() {
     renderControls();
+    ui.boardModes.forEach(button => {
+      const active = button.dataset.rankedBoardMode === leaderboardMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
   }
 
   async function loadLeaderboard() {
     ui.board.innerHTML = '<li class="ranked-empty">Обновляем рейтинг…</li>';
     try {
-      const { entries } = await request(`/leaderboard?mode=${encodeURIComponent(ui.mode.value)}`);
+      const { entries } = await request(`/leaderboard?mode=${leaderboardMode}`);
       ui.board.innerHTML = entries.length ? entries.map((entry, index) => {
         const avatar = /^https:\/\//i.test(entry.avatarUrl || '')
           ? `<img src="${escapeHtml(entry.avatarUrl)}" alt="" loading="lazy">`
@@ -304,13 +311,18 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     setStatus('Вы вышли из ranked.');
     render();
   });
-  ui.mode.addEventListener('change', loadLeaderboard);
+  ui.boardModes.forEach(button => button.addEventListener('click', () => {
+    leaderboardMode = button.dataset.rankedBoardMode;
+    render();
+    loadLeaderboard();
+  }));
   ui.start.addEventListener('click', () => action(async () => {
     const data = await request('/attempts', {
       method: 'POST',
       body: JSON.stringify({ mode: ui.mode.value, orderRequired: ui.order.checked })
     });
     attempt = data.attempt;
+    leaderboardMode = attempt.mode;
     verificationJob = null;
     stopVerificationPolling();
     verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
@@ -373,6 +385,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       ({ user } = await request('/me'));
       if (!user) throw new Error('Сессия закончилась.');
       ({ attempt } = await request('/attempts/active'));
+      if (attempt) leaderboardMode = attempt.mode;
       verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
       if (attempt) {
         const verification = await request(`/attempts/${attempt.id}/verification`);
