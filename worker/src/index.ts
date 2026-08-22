@@ -102,7 +102,7 @@ function corsHeaders(env: Env): HeadersInit {
 }
 
 function json(data: unknown, status: number, env: Env): Response {
-  return Response.json(data, { status, headers: corsHeaders(env) });
+  return Response.json(data, { status, headers: { ...corsHeaders(env), 'Cache-Control': 'no-store' } });
 }
 
 function randomToken(bytes = 32): string {
@@ -660,7 +660,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
     const retryAfter = 300;
     await env.DB.batch([
       env.DB.prepare("UPDATE verification_jobs SET status = 'retry', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
-        .bind('Реплей ещё не содержит журнал покупок.', JSON.stringify({ errors: proof.errors }), now, job.id),
+        .bind('Реплей ещё не содержит журнал покупок.', JSON.stringify({ errorCodes: proof.errorCodes, errors: proof.errors }), now, job.id),
       env.DB.prepare('UPDATE attempts SET verification_retry_at = ? WHERE id = ? AND status = \'committed\'')
         .bind(now + retryAfter, attempt.id)
     ]);
@@ -668,7 +668,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   }
 
   if (!proof.ok) {
-    const result = { errors: proof.errors, evidence: proof.evidence };
+    const result = { errorCodes: proof.errorCodes, errors: proof.errors, evidence: proof.evidence };
     await env.DB.batch([
       env.DB.prepare("UPDATE verification_jobs SET status = 'rejected', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
         .bind(proof.errors.join(' ').slice(0, 500), JSON.stringify(result), now, job.id),
@@ -899,6 +899,37 @@ async function handleLeaderboard(url: URL, env: Env): Promise<Response> {
   return json({ mode, entries: results }, 200, env);
 }
 
+async function handleStats(request: Request, url: URL, env: Env): Promise<Response> {
+  const mode = url.searchParams.get('mode') === 'turbo' ? 'turbo' : 'normal';
+  const user = await getUser(request, env);
+  const [summary, recent, personal] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS verifiedWins, COUNT(DISTINCT steam_id) AS players,
+      COALESCE(ROUND(AVG(score)), 0) AS averageScore,
+      COALESCE(ROUND(100.0 * SUM(CASE WHEN completion_items >= completion_total THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)), 0) AS fullBuildRate
+      FROM submissions WHERE mode = ?`).bind(mode).first(),
+    env.DB.prepare(`SELECT users.display_name AS displayName, users.avatar_url AS avatarUrl,
+      submissions.score, submissions.completion_items AS completedItems,
+      submissions.completion_total AS totalItems, submissions.modifier_id AS modifierId,
+      submissions.verified_at AS verifiedAt
+      FROM submissions JOIN users ON users.steam_id = submissions.steam_id
+      WHERE submissions.mode = ? ORDER BY submissions.verified_at DESC LIMIT 8`).bind(mode).all(),
+    user ? env.DB.prepare(`WITH ranked AS (
+        SELECT submissions.*, ROW_NUMBER() OVER (PARTITION BY steam_id ORDER BY score DESC, verified_at ASC) AS runRank
+        FROM submissions WHERE mode = ?
+      ), totals AS (
+        SELECT steam_id, SUM(score) AS score, COUNT(*) AS verifiedWins, MAX(score) AS bestScore,
+          SUM(rerolls + cancel_penalties) AS totalPenalties, MIN(verified_at) AS firstVerified
+        FROM ranked WHERE runRank <= 10 GROUP BY steam_id
+      ), standings AS (
+        SELECT totals.*, ROW_NUMBER() OVER (ORDER BY score DESC, totalPenalties ASC, firstVerified ASC) AS place
+        FROM totals
+      )
+      SELECT place, score, verifiedWins, bestScore, totalPenalties FROM standings WHERE steam_id = ?`)
+      .bind(mode, user.steam_id).first() : Promise.resolve(null)
+  ]);
+  return json({ mode, summary, recent: recent.results, personal }, 200, env);
+}
+
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(env) });
@@ -929,6 +960,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (request.method === 'POST' && url.pathname === '/auth/exchange') return handleExchange(request, env);
   if (request.method === 'GET' && url.pathname === '/me') return json({ user: await getUser(request, env) }, 200, env);
   if (request.method === 'GET' && url.pathname === '/leaderboard') return handleLeaderboard(url, env);
+  if (request.method === 'GET' && url.pathname === '/stats') return handleStats(request, url, env);
   if (request.method === 'GET' && url.pathname === '/attempts/active') {
     const user = await requireUser(request, env);
     let active = await env.DB.prepare(`SELECT * FROM attempts WHERE steam_id = ? AND status IN ('rolling', 'committed')
