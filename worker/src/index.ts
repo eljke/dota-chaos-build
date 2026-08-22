@@ -39,7 +39,7 @@ const VERIFICATION_JOB_SECONDS = 20 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
-const RULES_VERSION = '1.7.0';
+const RULES_VERSION = '1.7.2';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -424,7 +424,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.7.0',
+      'User-Agent': 'dota-chaos-ranked-worker/1.7.2',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -620,7 +620,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   const now = nowSeconds();
   const message = typeof value.message === 'string' ? value.message.slice(0, 500) : '';
   if (callbackStatus === 'running') {
-    await env.DB.prepare("UPDATE verification_jobs SET status = 'running', message = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
+    await env.DB.prepare("UPDATE verification_jobs SET status = 'running', message = ?, updated_at = ? WHERE id = ? AND status IN ('queued', 'retry')")
       .bind(message || 'GitHub Actions проверяет матч.', now, job.id).run();
     return json({ ok: true, status: 'running' }, 200, env);
   }
