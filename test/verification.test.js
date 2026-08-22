@@ -36,6 +36,7 @@ test('wrong purchase order fails strict order proof', () => {
   reversed.players[0].purchase_log[1] = { key: 'phase_boots', time: 800 };
   const result = verifyMatch({ match: reversed, attempt, accountId: 42 });
   assert.equal(result.ok, false);
+  assert.ok(result.errorCodes.includes('wrong_item_order'));
   assert.ok(result.errors.some(error => error.includes('порядке')));
 });
 
@@ -66,6 +67,7 @@ test('match must start after the anti-abuse guard window', () => {
   const guarded = { ...attempt, committed_at: 1000, match_guard_seconds: 300 };
   const result = verifyMatch({ match: { ...match, start_time: 1299 }, attempt: guarded, accountId: 42 });
   assert.equal(result.ok, false);
+  assert.ok(result.errorCodes.includes('started_too_early'));
   assert.ok(result.errors.some(error => error.includes('слишком рано')));
 });
 
