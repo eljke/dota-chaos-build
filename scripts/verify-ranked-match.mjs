@@ -199,8 +199,7 @@ async function openDota(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const url = `${OPENDOTA_API}${path}`;
   const maxAttempts = OPENDOTA_RETRY_DELAYS_MS.length;
-  const canUseFastFallback = Boolean(stratzToken)
-    && method === 'GET'
+  const canUseFastFallback = method === 'GET'
     && path.startsWith('/matches/');
   let nextDelayMs = 0;
 
