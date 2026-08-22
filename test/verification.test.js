@@ -12,8 +12,7 @@ const attempt = {
 const player = {
   account_id: 42, hero_id: 2, win: 1, leaver_status: 0,
   purchase_log: [
-    { key: 'phase_boots', time: 500 }, { key: 'blink', time: 800 },
-    { key: 'ultimate_scepter', time: 900 }, { key: 'aghanims_shard', time: 1000 }
+    { key: 'phase_boots', time: 500 }, { key: 'blink', time: 800 }
   ],
   item_0: 50, item_1: 1, item_2: 0, item_3: 0, item_4: 0, item_5: 0,
   backpack_0: 0, backpack_1: 0, backpack_2: 0
