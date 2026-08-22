@@ -7,8 +7,8 @@ const payload = {
   data: {
     match: {
       id: '9000000001', didRadiantWin: true, durationSeconds: 1800, startDateTime: 2000,
-      lobbyType: 7, gameMode: 23, radiantKills: 20, direKills: 10,
-      playbackData: { runeEvents: [{ fromPlayer: 0 }, { fromPlayer: 0 }] },
+      lobbyType: 'RANKED', gameMode: 'TURBO', radiantKills: 20, direKills: 10,
+      playbackData: { runeEvents: [{ indexId: 0 }, { indexId: 0 }] },
       players: [{
         steamAccountId: 42, playerSlot: 0, isVictory: true, heroId: 2,
         kills: 8, deaths: 2, assists: 8, leaverStatus: 0, towerDamage: 2500,
@@ -37,6 +37,8 @@ test('normalizes STRATZ match into verification shape', () => {
   assert.equal(match.players[0].item_uses_by_id[188], 1);
   assert.equal(match.players[0].camps_stacked, 2);
   assert.equal(match.players[0].rune_pickups, 2);
+  assert.equal(match.lobby_type, 7);
+  assert.equal(match.game_mode, 23);
 });
 
 test('STRATZ item-id purchase log can verify a ranked build', () => {

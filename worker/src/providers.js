@@ -1,10 +1,19 @@
 const AGHANIMS_SCEPTER_ID = 108;
 const AGHANIMS_SHARD_ID = 609;
 const SMOKE_OF_DECEIT_ID = 188;
+const STRATZ_LOBBY_TYPES = { UNRANKED: 0, TEAM_MATCH: 5, SOLO_QUEUE: 6, RANKED: 7, BATTLE_CUP: 9 };
+const STRATZ_GAME_MODES = {
+  ALL_PICK: 1, CAPTAINS_MODE: 2, RANDOM_DRAFT: 3, SINGLE_DRAFT: 4, ALL_RANDOM: 5,
+  LEAST_PLAYED: 12, CAPTAINS_DRAFT: 16, BALANCED_DRAFT: 17, ALL_PICK_RANKED: 22, TURBO: 23
+};
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function enumNumber(value, values) {
+  return typeof value === 'string' && value in values ? values[value] : number(value);
 }
 
 function array(value) {
@@ -41,7 +50,7 @@ export function normalizeStratzMatch(payload) {
     const wardsPlaced = array(player?.stats?.wards).length;
     const playerSlot = number(player?.playerSlot);
     const runePickups = runeEvents.filter(event => {
-      const source = number(event?.fromPlayer, -1);
+      const source = number(event?.indexId ?? event?.fromPlayer, -1);
       return source === playerIndex || source === playerSlot;
     }).length;
 
@@ -88,8 +97,8 @@ export function normalizeStratzMatch(payload) {
     radiant_win: match.didRadiantWin === true,
     duration: number(match.durationSeconds),
     start_time: number(match.startDateTime),
-    lobby_type: number(match.lobbyType),
-    game_mode: number(match.gameMode),
+    lobby_type: enumNumber(match.lobbyType, STRATZ_LOBBY_TYPES),
+    game_mode: enumNumber(match.gameMode, STRATZ_GAME_MODES),
     radiant_score: number(match.radiantKills),
     dire_score: number(match.direKills),
     players,

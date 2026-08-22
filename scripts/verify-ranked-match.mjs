@@ -3,7 +3,7 @@ import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
-const USER_AGENT = 'dota-chaos-ranked-verifier/1.7.4 (+https://github.com/eljke/dota-chaos-build)';
+const USER_AGENT = 'dota-chaos-ranked-verifier/1.7.5 (+https://github.com/eljke/dota-chaos-build)';
 const POLL_DELAYS_MS = [15_000, 30_000, 60_000, 90_000, 120_000];
 const OPENDOTA_RETRY_DELAYS_MS = [0, 30_000];
 const OPENDOTA_TIMEOUT_MS = 35_000;

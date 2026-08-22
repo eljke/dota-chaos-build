@@ -40,13 +40,13 @@ const VERIFICATION_JOB_SECONDS = 20 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
-const RULES_VERSION = '1.7.4';
+const RULES_VERSION = '1.7.5';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
     match(id: $id) {
       id didRadiantWin durationSeconds startDateTime lobbyType gameMode radiantKills direKills
-      playbackData { runeEvents { fromPlayer } }
+      playbackData { runeEvents { indexId } }
       players {
         steamAccountId playerSlot isVictory heroId kills deaths assists leaverStatus towerDamage
         item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
@@ -425,7 +425,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.7.4',
+      'User-Agent': 'dota-chaos-ranked-worker/1.7.5',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -587,7 +587,8 @@ async function handleStratzMatch(request: Request, env: Env): Promise<Response> 
       body: responseText.slice(0, 1000)
     });
     throw new HttpError(502, `STRATZ вернул HTTP ${response.status}.`, 'stratz_unavailable', {
-      upstreamStatus: response.status
+      upstreamStatus: response.status,
+      upstreamError: responseText.slice(0, 500)
     });
   }
 
