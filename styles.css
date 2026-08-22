@@ -1199,7 +1199,9 @@ body[data-app-view="ranked"] .app-shell { display: none; }
 .ranked-board-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .ranked-board-head span { color: #806b46; font-size: 7px; font-weight: 900; letter-spacing: .16em; }
 .ranked-board-head h2 { margin: 3px 0 0; color: #d3c39f; font: 500 24px Georgia, serif; }
-.ranked-board-head i { padding: 6px 8px; border: 1px solid #3e3b31; color: #756849; font-size: 8px; font-style: normal; }
+.ranked-board-switch { display: flex; padding: 2px; border: 1px solid #3e3b31; background: #0c1114; }
+.ranked-board-switch button { padding: 6px 9px; border: 0; background: transparent; color: #756849; font: inherit; font-size: 8px; font-weight: 800; text-transform: uppercase; cursor: pointer; }
+.ranked-board-switch button.is-active { background: #302b20; color: #d2b66f; }
 .ranked-board > p { color: #69757c; font-size: 9px; line-height: 1.55; }
 .ranked-board ol { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .ranked-board li { min-width: 0; padding: 8px; display: grid; grid-template-columns: 22px 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid #293238; background: #0c1114; }
