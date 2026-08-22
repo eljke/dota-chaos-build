@@ -3,7 +3,9 @@
 import { generateBuild, pick, seededRandom } from './js/generator.js';
 import { decodeBuildCode, encodeBuildCode } from './js/build-code.js';
 import { MODIFIERS as CONTRACTS } from './js/modifiers.js';
-import { initRanked } from './js/ranked-client.js?v=1.7.7';
+import { applyTranslations, getLocale, initI18n, modifierText, t } from './js/i18n.js';
+import { initRanked } from './js/ranked-client.js?v=1.8.0';
+import { initStats } from './js/stats-client.js?v=1.8.0';
 import {
   BOOT_KEYS, BOOT_KEY_SET, ITEM_KEY_ALIASES, ITEM_POOL_KEYS,
   MELEE_ONLY, RANGED_ONLY, isItemCompatible
@@ -16,7 +18,7 @@ const CONFIG = {
   metaSources: ['./data/meta.json'],
   sources: [
     {
-      name: 'локальный снимок',
+      name: 'local',
       heroes: './data/heroes.json',
       items: './data/items.json'
     },
@@ -44,11 +46,7 @@ const ROLE_RU = {
   Carry: 'Керри', Support: 'Поддержка', Nuker: 'Нюкер', Disabler: 'Контроль',
   Jungler: 'Лес', Durable: 'Танк', Escape: 'Мобильность', Pusher: 'Пуш', Initiator: 'Инициация'
 };
-const ATTR_RU = { str: 'СИЛА', agi: 'ЛОВКОСТЬ', int: 'ИНТЕЛЛЕКТ', all: 'УНИВЕРСАЛ' };
 const ATTR_GLYPH = { str: 'S', agi: 'A', int: 'I', all: 'U' };
-const QUALITY_RU = {
-  common: 'ОБЫЧНЫЙ', uncommon: 'НЕОБЫЧНЫЙ', rare: 'РЕДКИЙ', epic: 'ЭПИЧЕСКИЙ', artifact: 'АРТЕФАКТ'
-};
 
 const FALLBACK_HEROES = [
   ['antimage', 'Anti-Mage', 'agi', 'Melee', ['Carry', 'Escape', 'Nuker'], 150, 310],
@@ -121,7 +119,7 @@ const FALLBACK_ITEMS = Object.fromEntries(FALLBACK_ITEM_ROWS.map(([key, dname, c
   qual,
   img: `/apps/dota2/images/dota_react/items/${key}.png?t=1`,
   created: true,
-  lore: 'Резервное описание предмета. При подключении к сети загрузятся актуальные игровые данные.'
+  lore: ''
 }]));
 
 FALLBACK_ITEMS.ultimate_scepter = {
@@ -305,7 +303,7 @@ async function loadRemoteData() {
       lastError = error;
     }
   }
-  throw lastError || new Error('Не удалось загрузить данные');
+  throw lastError || new Error(t('data.error'));
 }
 
 async function loadMeta() {
@@ -323,9 +321,7 @@ async function loadMeta() {
                 ? `build ${revision}`
                 : 'dev';
 
-        dom.siteVersion.title = revision
-            ? `Версия сайта ${version || 'dev'} · сборка ${revision}`
-            : `Версия сайта ${version || 'dev'}`;
+        dom.siteVersion.title = t('version.title', { version: version || revision || 'dev' });
       }
 
       return meta;
@@ -336,7 +332,7 @@ async function loadMeta() {
 
   if (dom.siteVersion) {
     dom.siteVersion.textContent = 'dev';
-    dom.siteVersion.title = 'Метаданные версии недоступны';
+    dom.siteVersion.title = t('version.unavailable');
   }
 
   return null;
@@ -346,10 +342,7 @@ function applyMeta(meta) {
   state.meta = meta;
   const patch = String(meta?.patch || CONFIG.patchFallback);
   dom.patchLabel.textContent = patch;
-  const source = meta?.patchSource ? `Источник патча: ${meta.patchSource}. ` : '';
-  const released = meta?.patchTimestamp ? `Патч опубликован ${new Date(Number(meta.patchTimestamp) * 1000).toLocaleDateString('ru-RU')}. ` : '';
-  const synced = meta?.syncedAt ? `Константы синхронизированы ${new Date(meta.syncedAt).toLocaleString('ru-RU')}.` : '';
-  dom.patchLabel.parentElement.title = `${source}${released}${synced}`.trim() || 'Версия патча из резервной настройки сайта';
+  dom.patchLabel.parentElement.title = t('top.patch');
 }
 
 function setDataState(mode, text) {
@@ -481,14 +474,14 @@ function rerollHero() {
   state.seed = randomSeed();
   renderAll();
   updateUrl();
-  if (replacedLocked) showToast('Несовместимые закреплённые предметы заменены под нового героя.');
+  if (replacedLocked) showToast(t('toast.lockedConflict'));
 }
 
 function rerollUnlocked() {
   if (!state.ready) return;
   const unlocked = [0, 1, 2, 3, 4, 5].filter(index => !state.locked.has(index));
   if (!unlocked.length) {
-    showToast('Все шесть слотов закреплены. Сними хотя бы один замок.');
+    showToast(t('toast.allLocked'));
     return;
   }
 
@@ -554,7 +547,7 @@ function setForceBootSlot(enabled) {
   state.seed = randomSeed();
   renderAll();
   updateUrl();
-  showToast('Первый слот закреплён за случайным сапогом.');
+  showToast(t('toast.bootLocked'));
 }
 
 function imageWithFallback(img, fallbackText = '?') {
@@ -573,17 +566,17 @@ function renderHero() {
   dom.heroPortrait.alt = hero.localized_name;
   dom.heroBackdrop.style.backgroundImage = `url("${image}")`;
   dom.heroName.textContent = hero.localized_name;
-  dom.heroAttackType.textContent = hero.attack_type === 'Ranged' ? 'ДАЛЬНИЙ БОЙ' : 'БЛИЖНИЙ БОЙ';
+  dom.heroAttackType.textContent = t(hero.attack_type === 'Ranged' ? 'hero.ranged' : 'hero.melee');
   dom.heroAttackType.style.color = hero.attack_type === 'Ranged' ? '#6ea9c7' : '#b65e4c';
   dom.heroAttribute.dataset.attr = hero.primary_attr || 'all';
   dom.heroAttribute.textContent = ATTR_GLYPH[hero.primary_attr] || 'U';
-  dom.heroAttribute.title = ATTR_RU[hero.primary_attr] || 'УНИВЕРСАЛ';
+  dom.heroAttribute.title = t(`attr.${hero.primary_attr || 'all'}`);
   dom.heroRoles.innerHTML = (hero.roles || []).slice(0, 5)
-    .map(role => `<span class="role-chip">${ROLE_RU[role] || role}</span>`)
+    .map(role => `<span class="role-chip">${getLocale() === 'ru' ? (ROLE_RU[role] || role) : role}</span>`)
     .join('');
   dom.heroRange.textContent = String(hero.attack_range ?? '—');
   dom.heroSpeed.textContent = String(hero.move_speed ?? '—');
-  dom.heroAttrText.textContent = ATTR_RU[hero.primary_attr] || 'УНИВЕРСАЛ';
+  dom.heroAttrText.textContent = t(`attr.${hero.primary_attr || 'all'}`);
 }
 
 function renderInventory() {
@@ -598,9 +591,11 @@ function renderInventory() {
     img.src = assetUrl(item.img);
     img.alt = item.dname;
     imageWithFallback(img, item.dname);
-    cost.textContent = Number(item.cost || 0).toLocaleString('ru-RU');
+    cost.textContent = Number(item.cost || 0).toLocaleString(getLocale());
     node.dataset.index = String(index);
-    node.setAttribute('aria-label', `${item.dname}, ${item.cost || 0} золота`);
+    node.setAttribute('aria-label', `${item.dname}, ${t('item.gold', { cost: item.cost || 0 })}`);
+    lock.setAttribute('aria-label', t(state.locked.has(index) ? 'item.unlock' : 'item.lock'));
+    lock.title = t('item.lockHint');
 
     if (state.locked.has(index)) node.classList.add('is-locked');
     if (state.selectedIndex === index) node.classList.add('is-selected');
@@ -609,11 +604,11 @@ function renderInventory() {
     if (RANGED_ONLY.has(item.key)) {
       restriction.textContent = 'RNG';
       restriction.classList.add('is-ranged');
-      restriction.title = 'Только для героев дальнего боя';
+      restriction.title = t('item.ranged');
     } else if (MELEE_ONLY.has(item.key)) {
       restriction.textContent = 'MEL';
       restriction.classList.add('is-melee');
-      restriction.title = 'Только для героев ближнего боя';
+      restriction.title = t('item.melee');
     }
 
     node.addEventListener('click', () => inspectItem(item.key, index));
@@ -637,9 +632,9 @@ function plainText(value) {
 }
 
 function itemDescription(item) {
-  if (item?.key?.startsWith('recipe_')) return 'Рецепт, необходимый для завершения предмета.';
+  if (item?.key?.startsWith('recipe_')) return t('item.recipe');
   const ability = Array.isArray(item.abilities) ? item.abilities[0] : null;
-  return plainText(ability?.description || item.lore || item.notes || 'Описание недоступно.');
+  return plainText(ability?.description || item.lore || item.notes || t('item.noDescription'));
 }
 
 function recipeComponents(item) {
@@ -673,21 +668,21 @@ function renderInspector() {
     dom.itemInspector.innerHTML = `
       <div class="item-inspector__empty">
         <span class="mouse-icon" aria-hidden="true"></span>
-        Выбери предмет, чтобы посмотреть детали и дерево сборки. Компоненты внутри тоже можно открывать.
+        ${t('random.inspectorEmpty')}
       </div>`;
     return;
   }
 
   const isRecipe = item.key.startsWith('recipe_');
   const quality = isRecipe ? 'component' : (item.qual || 'common');
-  const qualityLabel = isRecipe ? 'РЕЦЕПТ' : (QUALITY_RU[quality] || 'ПРЕДМЕТ');
+  const qualityLabel = t(isRecipe ? 'quality.recipe' : `quality.${quality}`) || t('quality.item');
   const tags = [];
-  if (RANGED_ONLY.has(item.key)) tags.push('только дальний бой');
-  if (MELEE_ONLY.has(item.key)) tags.push('только ближний бой');
-  if (BOOT_KEY_SET.has(item.key)) tags.push('сапог');
+  if (RANGED_ONLY.has(item.key)) tags.push(t('item.tagRanged'));
+  if (MELEE_ONLY.has(item.key)) tags.push(t('item.tagMelee'));
+  if (BOOT_KEY_SET.has(item.key)) tags.push(t('item.tagBoots'));
   if (Array.isArray(item.abilities)) tags.push(...item.abilities.slice(0, 2).map(ability => ability.title).filter(Boolean));
   if (state.selectedIndex !== null && state.locked.has(state.selectedIndex) && state.inspectorRootKey === item.key) {
-    tags.push('слот закреплён');
+    tags.push(t('item.tagLocked'));
   }
 
   const components = recipeComponents(item);
@@ -702,29 +697,29 @@ function renderInspector() {
 
   const recipeMarkup = components.length
     ? `
-      <section class="recipe-panel" aria-label="Компоненты предмета">
+      <section class="recipe-panel" aria-label="${t('item.components')}">
         <div class="recipe-panel__head">
-          <div><span>ДЕРЕВО СБОРКИ</span><strong>Собирается из</strong></div>
-          <small>${componentTotal.toLocaleString('ru-RU')} золота</small>
+          <div><span>${t('item.recipeTree')}</span><strong>${t('item.madeFrom')}</strong></div>
+          <small>${t('item.gold', { cost: componentTotal.toLocaleString(getLocale()) })}</small>
         </div>
         <div class="recipe-components">
           ${components.map(component => `
-            <button class="recipe-component" type="button" data-component-key="${escapeHtml(component.key)}" title="Открыть ${escapeHtml(component.dname)}">
+            <button class="recipe-component" type="button" data-component-key="${escapeHtml(component.key)}" title="${t('item.open', { item: escapeHtml(component.dname) })}">
               <span class="recipe-component__image"><img src="${assetUrl(component.img)}" alt=""></span>
-              <span class="recipe-component__copy"><strong>${escapeHtml(component.dname)}</strong><small>${Number(component.cost || 0).toLocaleString('ru-RU')}</small></span>
+              <span class="recipe-component__copy"><strong>${escapeHtml(component.dname)}</strong><small>${Number(component.cost || 0).toLocaleString(getLocale())}</small></span>
               <span class="recipe-component__arrow" aria-hidden="true">›</span>
             </button>`).join('')}
         </div>
       </section>`
     : `
       <div class="recipe-leaf">
-        <span>БАЗОВЫЙ КОМПОНЕНТ</span>
-        Этот предмет не собирается из других предметов.
+        <span>${t('item.baseComponent')}</span>
+        ${t('item.baseHint')}
       </div>`;
 
   dom.itemInspector.innerHTML = `
-    <nav class="recipe-breadcrumbs" aria-label="Путь по рецепту">
-      ${path.length > 1 ? '<button class="recipe-back" type="button" data-recipe-back aria-label="Назад">←</button>' : ''}
+    <nav class="recipe-breadcrumbs" aria-label="${t('item.recipePath')}">
+      ${path.length > 1 ? `<button class="recipe-back" type="button" data-recipe-back aria-label="${t('item.back')}">←</button>` : ''}
       <div>${breadcrumbs}</div>
     </nav>
     <article class="inspector-card">
@@ -737,7 +732,7 @@ function renderInspector() {
         <p class="inspector-description">${escapeHtml(itemDescription(item))}</p>
         <div class="inspector-tags">${tags.map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
       </div>
-      <div class="inspector-price">${Number(item.cost || 0).toLocaleString('ru-RU')}</div>
+      <div class="inspector-price">${Number(item.cost || 0).toLocaleString(getLocale())}</div>
     </article>
     ${recipeMarkup}`;
 
@@ -767,7 +762,7 @@ function renderCost() {
   const total = state.items.reduce((sum, item) => sum + (Number(item.cost) || 0), 0)
     + (Number(state.itemsByKey.ultimate_scepter?.cost) || 4200)
     + (Number(state.itemsByKey.aghanims_shard?.cost) || 1400);
-  dom.buildCost.textContent = `${total.toLocaleString('ru-RU')} ЗОЛОТА`;
+  dom.buildCost.textContent = t('item.buildTotal', { cost: total.toLocaleString(getLocale()) });
 }
 
 function renderOptions() {
@@ -785,16 +780,17 @@ function renderUpgrades() {
 
 function renderContract() {
   const contract = CONTRACTS[state.contractIndex] || CONTRACTS[0];
-  dom.contractName.textContent = contract.name;
-  dom.contractDescription.textContent = contract.description;
+  const text = modifierText(contract);
+  dom.contractName.textContent = text.name;
+  dom.contractDescription.textContent = text.description;
 }
 
 function renderContractsCatalog() {
-  dom.showContractsButton.textContent = `Все модификаторы (${CONTRACTS.length})`;
+  dom.showContractsButton.textContent = `${t('random.allModifiers')} (${CONTRACTS.length})`;
   dom.contractsList.innerHTML = CONTRACTS.map((contract, index) => `
     <article class="contract-catalog-item ${index === state.contractIndex ? 'is-current' : ''}">
       <span>${String(index + 1).padStart(2, '0')}</span>
-      <div><strong>${escapeHtml(contract.name)}</strong><p>${escapeHtml(contract.description)} · Ranked +${Math.round((contract.multiplier - 1) * 100)}%</p></div>
+      <div><strong>${escapeHtml(modifierText(contract).name)}</strong><p>${escapeHtml(modifierText(contract).description)} · Ranked +${Math.round((contract.multiplier - 1) * 100)}%</p></div>
     </article>`).join('');
 }
 
@@ -907,27 +903,27 @@ function applySharedBuild(shared) {
 function importLobbyCode() {
   const raw = dom.lobbyCodeInput.value.trim();
   if (!raw) {
-    showToast('Вставь код сборки в поле импорта.');
+    showToast(t('toast.codeMissing'));
     return;
   }
 
   if (/^[A-Z0-9]{6,24}$/i.test(raw) && !raw.toUpperCase().startsWith('DCB1')) {
     generateFull(raw.toUpperCase(), { animate: true });
     dom.lobbyCodeInput.value = '';
-    showToast('Seed применён. Точный результат зависит от версии констант.');
+    showToast(t('toast.seedApplied'));
     return;
   }
 
   const decoded = decodeBuildCode(raw);
   const shared = decoded ? parseBuildParams(decoded) : null;
   if (!shared) {
-    showToast('Код не распознан или содержит несовместимую сборку.');
+    showToast(t('toast.codeInvalid'));
     return;
   }
 
   applySharedBuild(shared);
   dom.lobbyCodeInput.value = '';
-  showToast('Точная сборка импортирована.');
+  showToast(t('toast.codeImported'));
 }
 
 function restoreOrGenerate() {
@@ -999,18 +995,19 @@ function bindEvents() {
   dom.forceBootSlotToggle.addEventListener('change', event => setForceBootSlot(event.currentTarget.checked));
   dom.scepterSlotButton.addEventListener('click', () => inspectItem('ultimate_scepter'));
   dom.shardSlotButton.addEventListener('click', () => inspectItem('aghanims_shard'));
-  dom.copyLobbyCodeButton.addEventListener('click', () => copyText(currentLobbyCode(), 'Код точной сборки скопирован.'));
+  dom.copyLobbyCodeButton.addEventListener('click', () => copyText(currentLobbyCode(), t('toast.codeCopied')));
   dom.importLobbyCodeButton.addEventListener('click', importLobbyCode);
   dom.lobbyCodeInput.addEventListener('keydown', event => {
     if (event.key === 'Enter') importLobbyCode();
   });
-  dom.shareButton.addEventListener('click', () => copyText(window.location.href, 'Ссылка на точную сборку скопирована.'));
+  dom.shareButton.addEventListener('click', () => copyText(window.location.href, t('toast.linkCopied')));
 }
 
 async function bootstrap() {
+  initI18n();
   bindEvents();
   initAnalytics();
-  setDataState('', 'загрузка констант');
+  setDataState('', t('data.loading'));
 
   const metaPromise = loadMeta();
 
@@ -1020,12 +1017,12 @@ async function bootstrap() {
     state.itemsByKey = normalizeItems(remote.items);
     state.dataSourceName = remote.sourceName;
     state.usingFallback = false;
-    setDataState('ready', remote.sourceName === 'локальный снимок' ? 'константы синхронизированы' : `данные: ${remote.sourceName}`);
+    setDataState('ready', t('data.ready'));
   } catch (error) {
     state.heroes = FALLBACK_HEROES;
     state.itemsByKey = normalizeItems(FALLBACK_ITEMS);
     state.usingFallback = true;
-    setDataState('fallback', 'резервные данные');
+    setDataState('fallback', t('data.fallback'));
     console.warn('Remote Dota data unavailable, fallback enabled:', error);
   }
 
@@ -1043,6 +1040,16 @@ async function bootstrap() {
   state.ready = true;
   restoreOrGenerate();
   await initRanked({ onMessage: showToast });
+  initStats();
+  window.addEventListener('dcb:localechange', () => {
+    applyTranslations();
+    applyMeta(state.meta);
+    setDataState(state.usingFallback ? 'fallback' : 'ready', t(state.usingFallback ? 'data.fallback' : 'data.ready'));
+    dom.siteVersion.title = dom.siteVersion.textContent === 'dev'
+      ? t('version.unavailable')
+      : t('version.title', { version: dom.siteVersion.textContent.replace(/^v/, '') });
+    if (state.ready) renderAll();
+  });
 }
 
 bootstrap();

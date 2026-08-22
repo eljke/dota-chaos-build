@@ -20,8 +20,8 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.7.7">
-  <script type="application/ld+json">{
+  <link rel="stylesheet" href="styles.css?v=1.8.0">
+  <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
     "name":"Dota Chaos Build",
@@ -42,73 +42,80 @@
       <img src="assets/rune.svg" alt="" width="38" height="38">
       <span class="brand__text">
         <strong>DOTA CHAOS BUILD</strong>
-        <small>рандомный герой · случайный затар</small>
+        <small data-i18n="brand.tagline">герой, сборка, погнали</small>
       </span>
     </a>
 
     <div class="topbar__meta">
-      <span class="patch-badge" title="Текущий игровой патч">PATCH <b id="patchLabel">7.41e</b></span>
-      <span class="data-state" id="dataState"><i></i> загрузка данных</span>
+      <div class="language-switch" role="group" aria-label="Язык интерфейса" data-i18n-aria-label="language.label">
+        <button type="button" data-locale="ru" aria-pressed="true">RU</button>
+        <button type="button" data-locale="en" aria-pressed="false">EN</button>
+      </div>
+      <span class="patch-badge" title="Текущий патч Dota 2" data-i18n-title="top.patch">PATCH <b id="patchLabel">7.41e</b></span>
+      <span class="data-state" id="dataState"><i></i><span data-i18n="data.loading">Загружаем данные…</span></span>
     </div>
   </header>
 
-  <nav class="mode-tabs" aria-label="Режим приложения" role="tablist">
+  <nav class="mode-tabs" aria-label="Разделы приложения" data-i18n-aria-label="nav.label" role="tablist">
     <button class="mode-tab is-active" id="randomViewTab" type="button" role="tab" aria-selected="true">
-      <span>ОБЫЧНЫЙ РАНДОМ</span><small>замки, точечные рероллы и коды</small>
+      <span data-i18n="nav.random">РАНДОМ</span><small data-i18n="nav.randomHint">соберите челлендж для своей игры</small>
     </button>
     <button class="mode-tab mode-tab--ranked" id="rankedViewTab" type="button" role="tab" aria-selected="false">
-      <span>RANKED</span><small>серверная сборка и проверка победы</small>
+      <span data-i18n="nav.ranked">RANKED</span><small data-i18n="nav.rankedHint">подтвердите победу и получите очки</small>
+    </button>
+    <button class="mode-tab mode-tab--stats" id="statsViewTab" type="button" role="tab" aria-selected="false">
+      <span data-i18n="nav.stats">СТАТИСТИКА</span><small data-i18n="nav.statsHint">результаты игроков и последние матчи</small>
     </button>
   </nav>
 
   <section class="intro-copy" aria-labelledby="pageTitle">
-    <h1 id="pageTitle">Dota 2 Random — случайный герой и сборка</h1>
-    <p>Генератор выбирает героя, шесть предметов, Аганим, шард и дополнительный модификатор матча. Ограничения melee/ranged сохраняют смысл, остальное остаётся хаотичным.</p>
+    <h1 id="pageTitle" data-i18n="random.title">Случайный герой и сборка</h1>
+    <p data-i18n="random.subtitle">Герой, шесть предметов и дополнительное условие на матч. Ограничения для ближнего и дальнего боя остаются, всё остальное решает случай.</p>
   </section>
 
   <main class="app-shell">
     <section class="hero-panel dota-panel" aria-labelledby="heroName">
-      <div class="panel-cap panel-cap--red"><span>ГЕРОЙ</span></div>
+      <div class="panel-cap panel-cap--red"><span data-i18n="random.hero">ГЕРОЙ</span></div>
       <div class="hero-portrait-wrap">
         <div class="hero-backdrop" id="heroBackdrop"></div>
         <img class="hero-portrait" id="heroPortrait" alt="Портрет героя" width="520" height="300">
         <div class="hero-vignette"></div>
-        <div class="hero-attribute" id="heroAttribute" aria-label="Основной атрибут"></div>
+        <div class="hero-attribute" id="heroAttribute" aria-label="Основной атрибут" data-i18n-aria-label="random.attribute"></div>
       </div>
 
       <div class="hero-info">
         <div>
           <p class="eyebrow" id="heroAttackType">—</p>
-          <h2 id="heroName">Загрузка героев…</h2>
+          <h2 id="heroName" data-i18n="random.heroLoading">Выбираем героя…</h2>
         </div>
-        <button class="icon-button" id="rerollHeroButton" type="button" title="Сменить только героя" aria-label="Сменить только героя">
+        <button class="icon-button" id="rerollHeroButton" type="button" title="Сменить героя" aria-label="Сменить героя" data-i18n-title="random.rerollHero" data-i18n-aria-label="random.rerollHero">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg>
         </button>
       </div>
-      <div class="role-list" id="heroRoles" aria-label="Роли героя"></div>
+      <div class="role-list" id="heroRoles" aria-label="Роли героя" data-i18n-aria-label="random.roles"></div>
 
       <div class="hero-stats">
-        <div><span>ДАЛЬНОСТЬ</span><strong id="heroRange">—</strong></div>
-        <div><span>СКОРОСТЬ</span><strong id="heroSpeed">—</strong></div>
-        <div><span>АТРИБУТ</span><strong id="heroAttrText">—</strong></div>
+        <div><span data-i18n="random.range">ДАЛЬНОСТЬ</span><strong id="heroRange">—</strong></div>
+        <div><span data-i18n="random.speed">СКОРОСТЬ</span><strong id="heroSpeed">—</strong></div>
+        <div><span data-i18n="random.attribute">АТРИБУТ</span><strong id="heroAttrText">—</strong></div>
       </div>
     </section>
 
     <section class="loadout-panel dota-panel" aria-labelledby="loadoutTitle">
-      <div class="panel-cap"><span id="loadoutTitle">ИНВЕНТАРЬ</span><b id="buildCost">0</b></div>
+      <div class="panel-cap"><span id="loadoutTitle" data-i18n="random.inventory">СБОРКА</span><b id="buildCost">0</b></div>
 
       <div class="inventory-stage">
-        <div class="inventory-grid" id="inventoryGrid" aria-label="Шесть предметов сборки"></div>
+        <div class="inventory-grid" id="inventoryGrid" aria-label="Шесть предметов сборки" data-i18n-aria-label="random.inventoryLabel"></div>
 
-        <div class="upgrades-row" aria-label="Улучшения героя">
+        <div class="upgrades-row" aria-label="Дополнительные улучшения" data-i18n-aria-label="random.upgrades">
           <button class="upgrade-slot upgrade-slot--scepter" id="scepterSlotButton" type="button">
             <img id="scepterImage" alt="Aghanim's Scepter">
-            <div><span>АГАНИМ</span><strong>Aghanim's Scepter</strong></div>
+            <div><span data-i18n="random.scepter">АГАНИМ</span><strong>Aghanim's Scepter</strong></div>
             <i class="upgrade-check" aria-hidden="true">✓</i>
           </button>
           <button class="upgrade-slot upgrade-slot--shard" id="shardSlotButton" type="button">
             <img id="shardImage" alt="Aghanim's Shard">
-            <div><span>ШАРД</span><strong>Aghanim's Shard</strong></div>
+            <div><span data-i18n="random.shard">ШАРД</span><strong>Aghanim's Shard</strong></div>
             <i class="upgrade-check" aria-hidden="true">✓</i>
           </button>
         </div>
@@ -119,8 +126,8 @@
           <input id="forceBootSlotToggle" type="checkbox" checked>
           <span class="dota-toggle__track" aria-hidden="true"><i></i></span>
           <span class="dota-toggle__copy">
-            <strong>СЛУЧАЙНЫЙ САПОГ В СЛОТЕ 1</strong>
-            <small>Включено по умолчанию. Остальные сапоги исключаются из сборки.</small>
+            <strong data-i18n="random.bootTitle">Сапог в первом слоте</strong>
+            <small data-i18n="random.bootHint">Первый предмет всегда будет случайным сапогом.</small>
           </span>
         </label>
       </div>
@@ -128,7 +135,7 @@
       <div class="item-inspector" id="itemInspector" aria-live="polite">
         <div class="item-inspector__empty">
           <span class="mouse-icon" aria-hidden="true"></span>
-          Выбери предмет, чтобы посмотреть детали и дерево сборки. Компоненты внутри тоже можно открывать.
+          <span data-i18n="random.inspectorEmpty">Нажмите на предмет, чтобы посмотреть описание и компоненты.</span>
         </div>
       </div>
 
@@ -136,56 +143,56 @@
         <button class="primary-button" id="generateButton" type="button">
           <span class="primary-button__flare"></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10v2h-1v3.17l3.41 3.41a2 2 0 0 1 0 2.83L16 16.83V20h1v2H7v-2h1v-3.17l-3.41-3.42a2 2 0 0 1 0-2.82L8 7.17V4H7V2Zm3 2v4l-4 4 4 4v4h4v-4l4-4-4-4V4h-4Z"/></svg>
-          СГЕНЕРИРОВАТЬ СБОРКУ
+          <span data-i18n="random.generate">СОБРАТЬ ЧЕЛЛЕНДЖ</span>
         </button>
-        <button class="secondary-button" id="rerollUnlockedButton" type="button">Перебросить свободные</button>
+        <button class="secondary-button" id="rerollUnlockedButton" type="button" data-i18n="random.rerollFree">Сменить незакреплённое</button>
       </div>
 
-      <p class="rapier-note">Divine Rapier выпадает отдельным броском: <b>0,35%</b> на полную генерацию.</p>
+      <p class="rapier-note" data-i18n="random.rapier">Divine Rapier выпадает редко — примерно в 1 из 286 сборок.</p>
     </section>
 
     <aside class="side-column">
       <section class="contract-panel dota-panel" aria-labelledby="contractTitle">
-        <div class="panel-cap panel-cap--gold"><span id="contractTitle">КОНТРАКТ РОШАНА</span></div>
+        <div class="panel-cap panel-cap--gold"><span id="contractTitle" data-i18n="random.modifierTitle">УСЛОВИЕ НА МАТЧ</span></div>
         <div class="contract-seal" aria-hidden="true">
           <img src="assets/aegis.svg" alt="">
         </div>
-        <p class="contract-kicker">МОДИФИКАТОР МАТЧА</p>
+        <p class="contract-kicker" data-i18n="random.modifierTitle">УСЛОВИЕ НА МАТЧ</p>
         <h2 id="contractName">—</h2>
-        <p id="contractDescription">Дополнительное условие появится вместе со сборкой.</p>
+        <p id="contractDescription" data-i18n="random.modifierEmpty">Появится вместе со сборкой.</p>
         <div class="contract-actions">
-          <button class="text-button" id="rerollContractButton" type="button">Сменить модификатор</button>
-          <button class="text-button text-button--muted" id="showContractsButton" type="button">Все модификаторы</button>
+          <button class="text-button" id="rerollContractButton" type="button" data-i18n="random.rerollModifier">Сменить условие</button>
+          <button class="text-button text-button--muted" id="showContractsButton" type="button" data-i18n="random.allModifiers">Посмотреть все</button>
         </div>
       </section>
 
       <section class="seed-panel dota-panel" aria-labelledby="seedTitle">
-        <div class="panel-cap"><span id="seedTitle">КОД СБОРКИ</span></div>
-        <p>Код переносит точного героя, предметы, модификатор, сапоговый режим и закреплённые слоты.</p>
-        <label class="lobby-code-label" for="lobbyCodeOutput">Текущая сборка</label>
+        <div class="panel-cap"><span id="seedTitle" data-i18n="random.codeTitle">ПОДЕЛИТЬСЯ СБОРКОЙ</span></div>
+        <p data-i18n="random.codeHint">Код сохраняет героя, предметы, условие и закреплённые слоты.</p>
+        <label class="lobby-code-label" for="lobbyCodeOutput" data-i18n="random.currentBuild">Код этой сборки</label>
         <div class="lobby-code-row">
-          <input id="lobbyCodeOutput" type="text" readonly aria-label="Код текущей сборки">
-          <button class="copy-button" id="copyLobbyCodeButton" type="button">Копировать</button>
+          <input id="lobbyCodeOutput" type="text" readonly aria-label="Код текущей сборки" data-i18n-aria-label="random.codeLabel">
+          <button class="copy-button" id="copyLobbyCodeButton" type="button" data-i18n="random.copy">Копировать</button>
         </div>
-        <label class="lobby-code-label" for="lobbyCodeInput">Импортировать код</label>
+        <label class="lobby-code-label" for="lobbyCodeInput" data-i18n="random.importLabel">Вставить чужой код</label>
         <div class="lobby-code-row">
-          <input id="lobbyCodeInput" type="text" autocomplete="off" spellcheck="false" placeholder="DCB1-… или старый seed">
-          <button class="copy-button copy-button--import" id="importLobbyCodeButton" type="button">Импорт</button>
+          <input id="lobbyCodeInput" type="text" autocomplete="off" spellcheck="false" placeholder="DCB1-… или старый seed" data-i18n-placeholder="random.importPlaceholder">
+          <button class="copy-button copy-button--import" id="importLobbyCodeButton" type="button" data-i18n="random.import">Открыть</button>
         </div>
         <button class="share-button" id="shareButton" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a3.2 3.2 0 0 0 0-1.39l7.05-4.11A3 3 0 1 0 15 5c0 .23.03.46.08.67L8.03 9.78A3 3 0 1 0 8 14.22l7.12 4.16A3 3 0 1 0 18 16.08Z"/></svg>
-          Скопировать ссылку на сборку
+          <span data-i18n="random.share">Скопировать ссылку</span>
         </button>
       </section>
 
       <section class="rules-panel dota-panel">
-        <div class="panel-cap"><span>ПРАВИЛА РАНДОМА</span></div>
+        <div class="panel-cap"><span data-i18n="random.rulesTitle">КАК РАБОТАЕТ РАНДОМ</span></div>
         <ul>
-          <li><i class="dot dot--blue"></i> предметы для дальников — только дальникам;</li>
-          <li><i class="dot dot--red"></i> melee-предметы — только ближникам;</li>
-          <li><i class="dot dot--gold"></i> остальное намеренно остаётся хаотичным;</li>
-          <li><i class="dot dot--violet"></i> Аганим и шард входят в каждый челлендж;</li>
-          <li><i class="dot dot--green"></i> при включённой опции первый слот всегда занимает один случайный сапог.</li>
+          <li><i class="dot dot--blue"></i><span data-i18n="random.ruleRanged">предметы для дальнего боя достаются только ranged-героям;</span></li>
+          <li><i class="dot dot--red"></i><span data-i18n="random.ruleMelee">предметы для ближнего боя — только melee-героям;</span></li>
+          <li><i class="dot dot--gold"></i><span data-i18n="random.ruleChaos">остальные сочетания намеренно остаются случайными;</span></li>
+          <li><i class="dot dot--violet"></i><span data-i18n="random.ruleAghanim">Аганим и шард добавляются к каждому челленджу;</span></li>
+          <li><i class="dot dot--green"></i><span data-i18n="random.ruleBoot">опцию с сапогом в первом слоте можно отключить.</span></li>
         </ul>
       </section>
     </aside>
@@ -194,117 +201,148 @@
   <section class="ranked-panel ranked-hub" id="rankedView" aria-labelledby="rankedTitle">
     <header class="ranked-hero-head">
       <div>
-        <span class="ranked-kicker">SERVER-VERIFIED CHALLENGE</span>
-        <h1 id="rankedTitle">Ranked без частичных замков</h1>
-        <p>Герой, шесть предметов и модификатор выдаются сервером. Любой реролл меняет сборку целиком, а GitHub Actions проверяет матч; неполная сборка получает меньше очков.</p>
+        <span class="ranked-kicker" data-i18n="ranked.kicker">ПРОВЕРЯЕМЫЙ ЧЕЛЛЕНДЖ</span>
+        <h1 id="rankedTitle" data-i18n="ranked.title">Один ролл. Одна попытка.</h1>
+        <p data-i18n="ranked.subtitle">Получите героя и сборку, сыграйте матч и подтвердите победу по Match ID. Рероллы снижают итоговый счёт.</p>
       </div>
-      <div class="ranked-rule-chips" aria-label="Анти-абуз правила">
-        <span>СБОРКА АКТИВНА СРАЗУ</span><span>ТОЛЬКО ПОЛНЫЙ РЕРОЛЛ</span><span>ОТМЕНА СО ШТРАФОМ</span>
+      <div class="ranked-rule-chips">
+        <span data-i18n="ranked.ruleFixed">Сборка закрепляется</span><span data-i18n="ranked.ruleReroll">Реролл меняет всё</span><span data-i18n="ranked.ruleVerified">Матч проверяется автоматически</span>
       </div>
     </header>
 
     <div class="ranked-layout">
       <div class="ranked-main">
-        <section class="ranked-auth-card dota-panel" aria-label="Steam-профиль">
+        <section class="ranked-auth-card dota-panel" aria-label="Профиль Steam" data-i18n-aria-label="ranked.profile">
           <div class="ranked-user">
             <span class="ranked-avatar-shell">
               <img id="rankedAvatar" alt="" hidden>
               <i id="rankedAvatarFallback" aria-hidden="true">?</i>
             </span>
-            <span class="ranked-user-copy"><small>STEAM ПРОФИЛЬ</small><strong id="rankedName">Гость</strong><em id="rankedAuth">Проверяем сессию…</em></span>
+            <span class="ranked-user-copy"><small data-i18n="ranked.profile">ПРОФИЛЬ STEAM</small><strong id="rankedName" data-i18n="ranked.guest">Гость</strong><em id="rankedAuth" data-i18n="ranked.sessionLoading">Проверяем вход…</em></span>
           </div>
           <div class="ranked-auth-actions">
-            <button class="secondary-button" id="rankedLoginButton" type="button">Войти через Steam</button>
-            <button class="text-button" id="rankedLogoutButton" type="button" hidden>Выйти</button>
+            <button class="secondary-button" id="rankedLoginButton" type="button" data-i18n="ranked.login">Войти через Steam</button>
+            <button class="text-button" id="rankedLogoutButton" type="button" hidden data-i18n="ranked.logout">Выйти</button>
           </div>
         </section>
 
         <section class="ranked-setup dota-panel" id="rankedSetup">
-          <div class="ranked-section-title"><span>01</span><div><small>НАСТРОЙКА ПОПЫТКИ</small><h2>Выберите режим до первого ролла</h2></div></div>
+          <div class="ranked-section-title"><span>01</span><div><small data-i18n="ranked.setupKicker">НОВАЯ ПОПЫТКА</small><h2 data-i18n="ranked.setupTitle">Как играем?</h2></div></div>
           <div class="ranked-settings">
-            <label>РЕЖИМ<select id="rankedMode"><option value="normal">Обычный</option><option value="turbo">Turbo</option></select></label>
-            <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span>Строгий порядок предметов <b>+20%</b></span></label>
-            <button class="primary-button" id="rankedStartButton" type="button">НАЧАТЬ ПОПЫТКУ</button>
+            <label><span data-i18n="ranked.mode">РЕЖИМ</span><select id="rankedMode"><option value="normal" data-i18n="ranked.normal">Обычная игра</option><option value="turbo" data-i18n="ranked.turbo">Turbo</option></select></label>
+            <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span><span data-i18n="ranked.order">Собрать предметы по порядку</span> <b data-i18n="ranked.orderBonus">+20% к очкам</b></span></label>
+            <button class="primary-button" id="rankedStartButton" type="button" data-i18n="ranked.start">ПОЛУЧИТЬ СБОРКУ</button>
           </div>
-          <p class="ranked-fine-print">Выданная сборка активируется сразу. Для защиты от ролла во время драфта матч должен начаться после серверного таймера.</p>
+          <p class="ranked-fine-print" data-i18n="ranked.setupHint">Сборка закрепится сразу. Начните матч после короткого таймера — так нельзя подобрать удобный ролл во время драфта.</p>
         </section>
 
         <article class="ranked-attempt dota-panel" id="rankedAttempt" hidden>
           <div class="ranked-attempt-top">
             <div class="ranked-hero-card">
               <span class="ranked-hero-image"><img id="rankedHeroImage" alt=""></span>
-              <div><small id="rankedHeroMode">NORMAL</small><h2 id="rankedHeroName">—</h2><p>Герой и сборка уже зафиксированы на сервере.</p></div>
+              <div><small id="rankedHeroMode">NORMAL</small><h2 id="rankedHeroName">—</h2><p data-i18n="ranked.attemptFixed">Эта сборка закреплена за попыткой.</p></div>
             </div>
             <div class="ranked-metrics">
-              <span><small>ПОЛНЫЕ РЕРОЛЛЫ</small><b id="rankedRerolls">0</b></span>
-              <span><small>ШТРАФЫ ОТМЕНЫ</small><b id="rankedCancelPenalties">0</b></span>
-              <span class="ranked-score"><small>МАКС. ОЧКИ ЗА ПОБЕДУ</small><b id="rankedScore">1000</b></span>
+              <span><small data-i18n="ranked.rerolls">РЕРОЛЛЫ</small><b id="rankedRerolls">0</b></span>
+              <span><small data-i18n="ranked.cancels">ОТМЕНЫ</small><b id="rankedCancelPenalties">0</b></span>
+              <span class="ranked-score"><small data-i18n="ranked.maxScore">ВОЗМОЖНЫЕ ОЧКИ</small><b id="rankedScore">1000</b></span>
             </div>
           </div>
 
           <section class="ranked-build" aria-labelledby="rankedBuildTitle">
-            <div class="ranked-section-title"><span>02</span><div><small>СЕРВЕРНАЯ СБОРКА</small><h2 id="rankedBuildTitle">Без замков отдельных слотов</h2></div></div>
-            <div class="ranked-items" id="rankedItems" aria-label="Ranked-предметы"></div>
+            <div class="ranked-section-title"><span>02</span><div><small data-i18n="ranked.buildKicker">ВАША СБОРКА</small><h2 id="rankedBuildTitle" data-i18n="ranked.buildTitle">Шесть предметов на эту игру</h2></div></div>
+            <div class="ranked-items" id="rankedItems" aria-label="Предметы ranked-сборки" data-i18n-aria-label="ranked.itemsLabel"></div>
             <div class="ranked-upgrades">
-              <span><b>+</b>Aghanim's Scepter · необязательно</span><span><b>+</b>Aghanim's Shard · необязательно</span>
+              <span><b>+</b><span data-i18n="ranked.optionalScepter">Aghanim's Scepter · по желанию</span></span><span><b>+</b><span data-i18n="ranked.optionalShard">Aghanim's Shard · по желанию</span></span>
             </div>
           </section>
 
           <section class="ranked-contract">
-            <div><small>ПРОВЕРЯЕМЫЙ МОДИФИКАТОР</small><h2 id="rankedModifierName">—</h2><p id="rankedModifierDescription">—</p></div>
+            <div><small data-i18n="ranked.modifier">ДОПОЛНИТЕЛЬНОЕ УСЛОВИЕ</small><h2 id="rankedModifierName">—</h2><p id="rankedModifierDescription">—</p></div>
           </section>
 
           <section class="ranked-eligibility" id="rankedEligibility">
             <span class="ranked-timer-icon" aria-hidden="true"></span>
-            <div><small>АНТИ-АБУЗ ТАЙМЕР</small><strong id="rankedEligibilityTime">—</strong><p>Матч должен начаться после таймера.</p></div>
+            <div><small data-i18n="ranked.timer">КОГДА МОЖНО СТАРТОВАТЬ</small><strong id="rankedEligibilityTime">—</strong><p data-i18n="ranked.timerHint">Матч должен начаться после этого времени.</p></div>
           </section>
 
           <div class="ranked-actions">
-            <button class="secondary-button" id="rankedRerollButton" type="button">ПОЛНЫЙ РЕРОЛЛ</button>
-            <button class="danger-button" id="rankedCancelButton" type="button">ОТМЕНИТЬ СО ШТРАФОМ</button>
+            <button class="secondary-button" id="rankedRerollButton" type="button" data-i18n="ranked.reroll">СМЕНИТЬ ВСЮ СБОРКУ</button>
+            <button class="danger-button" id="rankedCancelButton" type="button" data-i18n="ranked.cancel">ЗАВЕРШИТЬ ПОПЫТКУ</button>
           </div>
 
           <div class="ranked-submit">
-            <label for="rankedMatchId"><span>03 · ПОДТВЕРЖДЕНИЕ</span><small>Вставьте ID завершённого матча после победы</small></label>
-            <div><input id="rankedMatchId" inputmode="numeric" autocomplete="off" placeholder="Например, 8123456789"><button class="primary-button" id="rankedSubmitButton" type="button">ПРОВЕРИТЬ ПОБЕДУ</button></div>
+            <label for="rankedMatchId"><span data-i18n="ranked.submitKicker">ПОСЛЕ ПОБЕДЫ</span><small data-i18n="ranked.submitHint">Вставьте Match ID завершённой игры</small></label>
+            <div><input id="rankedMatchId" inputmode="numeric" autocomplete="off" placeholder="Например, 8123456789" data-i18n-placeholder="ranked.matchPlaceholder"><button class="primary-button" id="rankedSubmitButton" type="button" data-i18n="ranked.submit">ПРОВЕРИТЬ МАТЧ</button></div>
           </div>
         </article>
 
-        <p class="ranked-status" id="rankedStatus" aria-live="polite">Войдите через Steam, чтобы начать ranked-попытку.</p>
+        <p class="ranked-status" id="rankedStatus" aria-live="polite" data-i18n="ranked.loginHint">Войдите через Steam, чтобы начать попытку.</p>
       </div>
 
       <aside class="ranked-board dota-panel">
         <div class="ranked-board-head">
-          <div><span>TOP 50</span><h2>ЛИДЕРБОРД</h2></div>
-          <div class="ranked-board-switch" role="group" aria-label="Режим лидерборда">
+          <div><span>TOP 50</span><h2 data-i18n="ranked.boardTitle">ЛИДЕРБОРД</h2></div>
+          <div class="ranked-board-switch" role="group" aria-label="Режим лидерборда" data-i18n-aria-label="ranked.boardMode">
             <button class="is-active" type="button" data-ranked-board-mode="normal" aria-pressed="true">Normal</button>
             <button type="button" data-ranked-board-mode="turbo" aria-pressed="false">Turbo</button>
           </div>
         </div>
-        <p>Normal и Turbo считаются отдельно. При равенстве выше игрок с меньшим суммарным штрафом.</p>
-        <ol id="rankedLeaderboard"><li class="ranked-empty">Загрузка…</li></ol>
+        <p data-i18n="ranked.boardHint">Режимы считаются отдельно. При равных очках выше игрок с меньшим числом штрафов.</p>
+        <ol id="rankedLeaderboard"><li class="ranked-empty" data-i18n="ranked.boardLoading">Загружаем результаты…</li></ol>
       </aside>
+    </div>
+  </section>
+
+  <section class="stats-panel stats-hub" id="statsView" aria-labelledby="statsTitle">
+    <header class="stats-hero">
+      <div>
+        <span class="ranked-kicker" data-i18n="stats.kicker">ОБЩАЯ СТАТИСТИКА</span>
+        <h1 id="statsTitle" data-i18n="stats.title">Как играют в Chaos Build</h1>
+        <p data-i18n="stats.subtitle">Подтверждённые победы, средние результаты и последние матчи. Normal и Turbo считаются отдельно.</p>
+      </div>
+      <div class="ranked-board-switch stats-mode-switch" role="group" aria-label="Режим статистики" data-i18n-aria-label="stats.mode">
+        <button class="is-active" type="button" data-stats-mode="normal" aria-pressed="true">Normal</button>
+        <button type="button" data-stats-mode="turbo" aria-pressed="false">Turbo</button>
+      </div>
+    </header>
+    <p class="stats-status" id="statsStatus" aria-live="polite"></p>
+    <div class="stats-summary">
+      <article class="dota-panel"><small data-i18n="stats.wins">Подтверждённые победы</small><strong id="statsWins">0</strong></article>
+      <article class="dota-panel"><small data-i18n="stats.players">Игроки в рейтинге</small><strong id="statsPlayers">0</strong></article>
+      <article class="dota-panel"><small data-i18n="stats.average">Средний результат</small><strong id="statsAverage">0</strong></article>
+      <article class="dota-panel"><small data-i18n="stats.fullBuilds">Полные сборки</small><strong id="statsFullBuilds">0%</strong></article>
+    </div>
+    <div class="stats-layout">
+      <section class="stats-personal dota-panel">
+        <div class="panel-cap"><span data-i18n="stats.personalTitle">ВАШ РЕЗУЛЬТАТ</span></div>
+        <div class="stats-personal-grid" id="statsPersonal"><p data-i18n="stats.personalGuest">Войдите через Steam, чтобы увидеть своё место и лучшие матчи.</p></div>
+      </section>
+      <section class="stats-recent dota-panel">
+        <div class="panel-cap"><span data-i18n="stats.recentTitle">ПОСЛЕДНИЕ ПОБЕДЫ</span></div>
+        <ol id="statsRecent"><li class="stats-empty" data-i18n="stats.loading">Загружаем статистику…</li></ol>
+      </section>
     </div>
   </section>
 
   <footer class="footer">
     <div>
-      <p>Неофициальный фан-проект. Dota 2 и игровые материалы принадлежат Valve Corporation.</p>
-      <p class="footer__seo">Dota 2 Random — случайный герой, random build, предметы и модификаторы матча.</p>
+      <p data-i18n="footer.disclaimer">Неофициальный фан-проект. Dota 2 и игровые материалы принадлежат Valve Corporation.</p>
+      <p class="footer__seo" data-i18n="footer.seo">Случайные герои, сборки и проверяемые ranked-челленджи для Dota 2.</p>
     </div>
     <div class="footer__links">
       <button class="site-version" id="releaseNotesButton" type="button" aria-haspopup="dialog" aria-controls="releaseNotesDialog">
-        <span id="siteVersion">v…</span><span>Что нового</span>
+        <span id="siteVersion">v…</span><span data-i18n="footer.whatsNew">Что нового</span>
       </button>
-      <a id="statsLink" href="#" target="_blank" rel="noreferrer" hidden>Статистика посещений</a>
-      <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer">Официальные обновления</a>
+      <a id="statsLink" href="#" target="_blank" rel="noreferrer" hidden data-i18n="footer.visits">Посещения</a>
+      <a href="https://www.dota2.com/news/updates" target="_blank" rel="noreferrer" data-i18n="footer.official">Обновления Dota 2</a>
     </div>
   </footer>
 
   <dialog class="contracts-dialog" id="contractsDialog" aria-labelledby="contractsDialogTitle">
     <div class="contracts-dialog__head">
-      <div><span>КАТАЛОГ ХАОСА</span><h2 id="contractsDialogTitle">Все модификаторы матча</h2></div>
-      <button id="closeContractsButton" type="button" aria-label="Закрыть">×</button>
+      <div><span data-i18n="dialogs.modifiersKicker">ВСЕ УСЛОВИЯ</span><h2 id="contractsDialogTitle" data-i18n="dialogs.modifiersTitle">Модификаторы матча</h2></div>
+      <button id="closeContractsButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="contracts-list" id="contractsList"></div>
   </dialog>
@@ -312,65 +350,72 @@
 
   <dialog class="contracts-dialog ranked-cancel-dialog" id="rankedCancelDialog" aria-labelledby="rankedCancelTitle">
     <div class="contracts-dialog__head">
-      <div><span>ШТРАФ ЗА ОТМЕНУ</span><h2 id="rankedCancelTitle">Завершить текущую попытку?</h2></div>
-      <button id="rankedCancelClose" type="button" aria-label="Закрыть">×</button>
+      <div><span data-i18n="ranked.cancelDialogKicker">ЗАВЕРШЕНИЕ ПОПЫТКИ</span><h2 id="rankedCancelTitle" data-i18n="ranked.cancelDialogTitle">Точно закончить?</h2></div>
+      <button id="rankedCancelClose" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="ranked-cancel-body">
-      <p id="rankedCancelPenaltyText">Отмена добавит виртуальный реролл к следующей попытке.</p>
-      <div><button class="secondary-button" id="rankedCancelKeep" type="button">ОСТАТЬСЯ</button><button class="danger-button" id="rankedCancelConfirm" type="button">ОТМЕНИТЬ ПОПЫТКУ</button></div>
+      <p id="rankedCancelPenaltyText" data-i18n="ranked.cancelDialogText">Следующая попытка получит штраф как за один дополнительный реролл.</p>
+      <div><button class="secondary-button" id="rankedCancelKeep" type="button" data-i18n="ranked.keep">ПРОДОЛЖИТЬ ИГРАТЬ</button><button class="danger-button" id="rankedCancelConfirm" type="button" data-i18n="ranked.confirmCancel">ЗАВЕРШИТЬ</button></div>
     </div>
   </dialog>
 
   <dialog class="contracts-dialog release-dialog" id="releaseNotesDialog" aria-labelledby="releaseNotesTitle">
     <div class="contracts-dialog__head">
-      <div><span>ИСТОРИЯ ОБНОВЛЕНИЙ</span><h2 id="releaseNotesTitle">Что нового</h2></div>
-      <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть">×</button>
+      <div><span data-i18n="dialogs.releaseKicker">ОБНОВЛЕНИЯ</span><h2 id="releaseNotesTitle" data-i18n="dialogs.releaseTitle">Что нового</h2></div>
+      <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
       <article>
+        <header><h3>1.8.0</h3><time datetime="2026-08-23" data-i18n="release.1.8.0.date">23 августа 2026</time></header>
+        <ul>
+          <li data-i18n="release.1.8.0.a">Интерфейс переписан более простым и живым языком.</li>
+          <li data-i18n="release.1.8.0.b">Добавлены английская локализация и экран статистики.</li>
+        </ul>
+      </article>
+      <article lang="ru">
         <header><h3>1.7.7</h3><time datetime="2026-08-23">23 августа 2026</time></header>
         <ul>
           <li>Добавлен отдельный переключатель Normal / Turbo для лидерборда.</li>
           <li>После перезагрузки лидерборд открывается в режиме активной ranked-попытки.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.6</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Aghanim’s Scepter и Aghanim’s Shard больше не обязательны для подтверждения ranked-победы.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.5</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Проверка обновлена для актуальной схемы событий рун STRATZ.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.4</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Исправлена совместимость серверного STRATZ-запроса с защитой API от технических клиентов.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.3</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Исправлен повторный запрос OpenDota после временно недоступного резервного провайдера.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.2</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Резервная проверка STRATZ теперь проходит через защищённый серверный прокси и не блокируется на GitHub runner.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.1</h3><time datetime="2026-08-22">22 августа 2026</time></header>
         <ul>
           <li>Проверка автоматически переключается на резервный STRATZ, если OpenDota ещё не разобрала реплей.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.7.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Проверка ranked-матчей вынесена в GitHub Actions: Cloudflare Worker больше не расходует общий анонимный лимит OpenDota.</li>
@@ -379,7 +424,7 @@
           <li>Улучшенные предметы засчитываются за исходные компоненты, например Parasma — за Witch Blade.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.6.1</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Добавили серверный кэш матчей и защиту от повторных запросов разбора, чтобы экономить бесплатный лимит OpenDota.</li>
@@ -388,7 +433,7 @@
           <li>Неверный герой, поражение и слишком ранний старт отклоняются до дорогого разбора реплея.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.6.0</h3><time datetime="2026-08-07">7 августа 2026</time></header>
         <ul>
           <li>Вынесли ranked в отдельную вкладку с собственной карточкой героя и предметов — обычные замки слотов туда больше не попадают.</li>
@@ -398,18 +443,18 @@
           <li>Steam-профиль теперь показывает никнейм и аватар; лидерборд тоже стал визуальнее.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.5.1</h3><time datetime="2026-08-06">6 августа 2026</time></header>
         <ul><li>Добавили доступную прямо на сайте историю обновлений.</li></ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.5.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
         <ul>
           <li>Переработали модификаторы: теперь каждый ranked-челлендж можно подтвердить данными матча.</li>
           <li>Добавили бонус сложности модификатора и фильтрацию заданий по роли героя и сборке.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.4.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
         <ul>
           <li>Запустили ranked: сервер выдаёт сборку и учитывает каждый полный реролл.</li>
@@ -417,7 +462,7 @@
           <li>Строгий порядок покупки можно включить перед стартом за бонус к очкам.</li>
         </ul>
       </article>
-      <article>
+      <article lang="ru">
         <header><h3>1.3.0</h3><time datetime="2026-08-06">6 августа 2026</time></header>
         <ul><li>Сделали генерацию и коды сборок стабильнее между обновлениями сайта.</li></ul>
       </article>
@@ -431,7 +476,7 @@
       <div class="inventory-slot__shine"></div>
       <img alt="">
       <span class="item-cost"></span>
-      <button class="lock-button" type="button" aria-label="Зафиксировать предмет" title="Сохранить при перебросе">
+      <button class="lock-button" type="button" aria-label="Закрепить предмет" title="Сохранить при следующем ролле" data-i18n-aria-label="item.lock" data-i18n-title="item.lockHint">
         <svg class="lock-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6a5 5 0 0 0-9.9-1H9.2A3 3 0 0 1 15 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Zm0 12H6V10h12v10Zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
         <svg class="lock-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Zm-9-2a3 3 0 0 1 6 0v2H9V6Zm9 14H6V10h12v10Zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>
       </button>
@@ -440,6 +485,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.7.7"></script>
+  <script type="module" src="app.js?v=1.8.0"></script>
 </body>
 </html>

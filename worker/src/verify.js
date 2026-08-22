@@ -110,7 +110,7 @@ export function calculateScore({
 
 export function verifyModifier({ modifierId, match, player, attempt }) {
   const modifier = modifierById(modifierId);
-  if (!modifier) return { ok: !modifierId, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };
+  if (!modifier) return { ok: !modifierId, code: modifierId ? 'unknown_modifier' : null, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };
 
   const turbo = attempt.mode === 'turbo';
   const log = Array.isArray(player.purchase_log) ? player.purchase_log : [];
@@ -155,6 +155,7 @@ export function verifyModifier({ modifierId, match, player, attempt }) {
 
   return {
     ok,
+    code: ok ? null : 'modifier_failed',
     error: ok ? null : `Не выполнен модификатор «${modifier.name}»: ${modifier.description}`,
     evidence: { id: modifier.id, value }
   };
@@ -162,24 +163,26 @@ export function verifyModifier({ modifierId, match, player, attempt }) {
 
 export function verifyMatch({ match, attempt, accountId }) {
   const errors = [];
+  const errorCodes = [];
+  const fail = (code, message) => { errorCodes.push(code); errors.push(message); };
   const players = Array.isArray(match?.players) ? match.players : [];
   const player = players.find(candidate => Number(candidate?.account_id) === Number(accountId));
 
-  if (!player) return { ok: false, parsed: true, errors: ['В матче не найден авторизованный Steam-аккаунт.'] };
+  if (!player) return { ok: false, parsed: true, errorCodes: ['player_not_found'], errors: ['В матче не найден авторизованный Steam-аккаунт.'] };
 
-  if (!PUBLIC_LOBBIES.has(Number(match.lobby_type))) errors.push('Допускаются только публичные матчи без ботов.');
+  if (!PUBLIC_LOBBIES.has(Number(match.lobby_type))) fail('public_match_required', 'Допускаются только публичные матчи без ботов.');
   const isTurbo = Number(match.game_mode) === 23;
   if (attempt.mode === 'turbo' ? !isTurbo : !NORMAL_GAME_MODES.has(Number(match.game_mode))) {
-    errors.push(`Матч не соответствует режиму ${attempt.mode === 'turbo' ? 'Turbo' : 'Normal'}.`);
+    fail('wrong_mode', `Матч не соответствует режиму ${attempt.mode === 'turbo' ? 'Turbo' : 'Normal'}.`);
   }
-  if (Number(player.hero_id) !== Number(attempt.hero_id)) errors.push('Сыгран не выданный герой.');
-  if (Number(player.win) !== 1) errors.push('Матч не завершён победой.');
-  if (Number(player.leaver_status) !== 0) errors.push('Матч содержит abandon или ранний выход.');
+  if (Number(player.hero_id) !== Number(attempt.hero_id)) fail('wrong_hero', 'Сыгран не выданный герой.');
+  if (Number(player.win) !== 1) fail('not_a_win', 'Матч не завершён победой.');
+  if (Number(player.leaver_status) !== 0) fail('abandon', 'Матч содержит abandon или ранний выход.');
 
   const guardSeconds = Number(attempt.match_guard_seconds || 0);
   const eligibleAfter = Number(attempt.committed_at) + guardSeconds;
   if (!Number.isFinite(eligibleAfter) || Number(match.start_time) < eligibleAfter) {
-    errors.push(`Матч начался слишком рано: ranked-сборка должна быть выдана минимум за ${Math.ceil(guardSeconds / 60)} мин. до старта.`);
+    fail('started_too_early', `Матч начался слишком рано: ranked-сборка должна быть выдана минимум за ${Math.ceil(guardSeconds / 60)} мин. до старта.`);
   }
 
   const basicEvidence = {
@@ -193,9 +196,9 @@ export function verifyMatch({ match, attempt, accountId }) {
 
   // Basic match data is enough to reject a wrong hero, loss or invalid start time.
   // Do not spend a replay-parse request on a match that can never pass verification.
-  if (errors.length) return { ok: false, parsed: true, errors, player, evidence: basicEvidence };
+  if (errors.length) return { ok: false, parsed: true, errorCodes, errors, player, evidence: basicEvidence };
   if (!Array.isArray(player.purchase_log)) {
-    return { ok: false, parsed: false, errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
+    return { ok: false, parsed: false, errorCodes: ['purchase_log_pending'], errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
   }
 
   const items = Array.isArray(attempt.items) ? attempt.items : [];
@@ -217,14 +220,14 @@ export function verifyMatch({ match, attempt, accountId }) {
   }));
   const completedItems = matchedItems.filter(item => item.matched).length;
 
-  if (completedItems === 0) errors.push('Не подтверждён ни один предмет из выданной сборки.');
+  if (completedItems === 0) fail('no_build_items', 'Не подтверждён ни один предмет из выданной сборки.');
 
   if (attempt.order_required) {
     let previousIndex = -1;
     for (const item of matchedItems) {
       if (!item.matched) continue;
       if (item.purchaseIndex <= previousIndex) {
-        errors.push('Подтверждённые предметы завершены не в выданном порядке.');
+        fail('wrong_item_order', 'Подтверждённые предметы завершены не в выданном порядке.');
         break;
       }
       previousIndex = item.purchaseIndex;
@@ -232,12 +235,13 @@ export function verifyMatch({ match, attempt, accountId }) {
   }
 
   const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
-  if (!modifierProof.ok && modifierProof.error) errors.push(modifierProof.error);
+  if (!modifierProof.ok && modifierProof.error) fail(modifierProof.code || 'modifier_failed', modifierProof.error);
 
   const totalItems = items.length || 6;
   return {
     ok: errors.length === 0,
     parsed: true,
+    errorCodes,
     errors,
     player,
     completedItems,
