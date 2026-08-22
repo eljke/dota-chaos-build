@@ -363,10 +363,12 @@ async function requestParse() {
 
 async function fetchMatchWithFallback() {
   let openDotaError = null;
+  let openDotaMatch = null;
 
   try {
-    const match = await fetchMatch();
-    if (match) return match;
+    openDotaMatch = await fetchMatch();
+    if (openDotaMatch && verifyMatch({ match: openDotaMatch, attempt, accountId }).parsed) return openDotaMatch;
+    if (openDotaMatch) logEvent('opendota', 'unparsed', { matchId, fallback: Boolean(stratzToken) });
   } catch (error) {
     openDotaError = error;
     logEvent('verification', 'opendota_failed', {
@@ -377,7 +379,7 @@ async function fetchMatchWithFallback() {
 
   if (!stratzToken) {
     if (openDotaError) throw openDotaError;
-    return null;
+    return openDotaMatch;
   }
 
   try {
@@ -403,7 +405,7 @@ async function fetchMatchWithFallback() {
   }
 
   if (openDotaError) throw openDotaError;
-  return null;
+  return openDotaMatch;
 }
 
 function compactPlayer(player) {
