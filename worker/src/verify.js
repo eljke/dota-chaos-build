@@ -219,11 +219,6 @@ export function verifyMatch({ match, attempt, accountId }) {
 
   if (completedItems === 0) errors.push('Не подтверждён ни один предмет из выданной сборки.');
 
-  const purchases = new Set(purchaseLog.map(entry => entry?.key));
-  const purchaseIds = new Set(purchaseLog.map(entry => Number(entry?.id ?? entry?.item_id)));
-  if (!purchases.has('ultimate_scepter') && !purchaseIds.has(108)) errors.push("Не подтверждена покупка Aghanim's Scepter.");
-  if (!purchases.has('aghanims_shard') && !purchaseIds.has(609)) errors.push("Не подтверждена покупка Aghanim's Shard.");
-
   if (attempt.order_required) {
     let previousIndex = -1;
     for (const item of matchedItems) {
