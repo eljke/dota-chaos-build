@@ -29,6 +29,7 @@ type AttemptRow = {
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
 const STEAM_PLAYER_SUMMARIES = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/';
 const STRATZ_API = 'https://api.stratz.com/graphql';
+const STRATZ_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const STEAM_ID_BASE = 76561197960265728n;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ATTEMPT_SECONDS = 24 * 60 * 60;
@@ -39,7 +40,7 @@ const VERIFICATION_JOB_SECONDS = 20 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
-const RULES_VERSION = '1.7.2';
+const RULES_VERSION = '1.7.4';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -424,7 +425,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.7.2',
+      'User-Agent': 'dota-chaos-ranked-worker/1.7.4',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -565,7 +566,8 @@ async function handleStratzMatch(request: Request, env: Env): Promise<Response> 
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
-        Accept: 'application/graphql-response+json, application/json'
+        Accept: 'application/graphql-response+json, application/json',
+        'User-Agent': STRATZ_USER_AGENT
       },
       body: JSON.stringify({
         query: STRATZ_MATCH_QUERY,
