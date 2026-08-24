@@ -40,7 +40,7 @@ const VERIFICATION_JOB_SECONDS = 20 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
-const RULES_VERSION = '1.8.0';
+const RULES_VERSION = '1.8.1';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -425,7 +425,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.8.0',
+      'User-Agent': 'dota-chaos-ranked-worker/1.8.1',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
