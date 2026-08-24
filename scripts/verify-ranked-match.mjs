@@ -3,10 +3,11 @@ import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
-const USER_AGENT = 'dota-chaos-ranked-verifier/1.8.2 (+https://github.com/eljke/dota-chaos-build)';
+const USER_AGENT = 'dota-chaos-ranked-verifier/1.8.3 (+https://github.com/eljke/dota-chaos-build)';
 const POLL_DELAYS_MS = [30_000];
 const OPENDOTA_RETRY_DELAYS_MS = [0];
 const OPENDOTA_TIMEOUT_MS = 35_000;
+const VERIFICATION_RETRY_SECONDS = 60;
 const OPENDOTA_TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);
 const RESPONSE_BODY_LOG_LIMIT = 1_000;
 
@@ -32,7 +33,7 @@ if (callbackSecret.length < 32) throw new Error('VERIFICATION_CALLBACK_SECRET is
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 class RetryableProviderError extends Error {
-  constructor(message, retryAfter = 300) {
+  constructor(message, retryAfter = VERIFICATION_RETRY_SECONDS) {
     super(message);
     this.retryAfter = retryAfter;
   }
@@ -112,7 +113,7 @@ async function fetchStratzMatch() {
     });
     throw new RetryableProviderError(
       `STRATZ-прокси недоступен: ${error instanceof Error ? error.message : String(error)}.`,
-      300
+      VERIFICATION_RETRY_SECONDS
     );
   }
 
@@ -129,7 +130,7 @@ async function fetchStratzMatch() {
   if (!response.ok) {
     throw new RetryableProviderError(
       `STRATZ-прокси вернул HTTP ${response.status}${responseSuffix(response)}.`,
-      retryAfterFromResponse(response, bodySnippet || '', 300)
+      retryAfterFromResponse(response, bodySnippet || '', VERIFICATION_RETRY_SECONDS)
     );
   }
 
@@ -189,7 +190,7 @@ async function callback(payload) {
   throw lastError || new Error('Callback failed.');
 }
 
-function retryAfterFromResponse(response, body, fallback = 300) {
+function retryAfterFromResponse(response, body, fallback = VERIFICATION_RETRY_SECONDS) {
   const header = Number(response.headers.get('retry-after') || 0);
   if (header > 0) return Math.min(3600, Math.ceil(header));
   return /daily/i.test(body) ? 1800 : fallback;
@@ -246,7 +247,7 @@ async function openDota(path, options = {}) {
 
       throw new RetryableProviderError(
         `OpenDota недоступна из GitHub Actions: ${error instanceof Error ? error.message : String(error)}.`,
-        300
+        VERIFICATION_RETRY_SECONDS
       );
     }
 
@@ -291,7 +292,7 @@ async function openDota(path, options = {}) {
     nextDelayMs = Math.max(configuredDelay, retryAfterMs);
   }
 
-  throw new RetryableProviderError('OpenDota временно недоступна.', 300);
+  throw new RetryableProviderError('OpenDota временно недоступна.');
 }
 
 async function fetchMatch() {
@@ -301,11 +302,11 @@ async function fetchMatch() {
     const body = await response.clone().text().catch(() => '');
     throw new RetryableProviderError(
       `OpenDota вернула HTTP ${response.status}${responseSuffix(response)}.`,
-      retryAfterFromResponse(response, body, 300)
+      retryAfterFromResponse(response, body)
     );
   }
   const match = await response.json().catch(() => null);
-  if (!match || typeof match !== 'object') throw new RetryableProviderError('OpenDota вернула некорректный JSON.', 300);
+  if (!match || typeof match !== 'object') throw new RetryableProviderError('OpenDota вернула некорректный JSON.');
   return match;
 }
 
@@ -315,7 +316,7 @@ async function requestParse() {
     const body = await response.clone().text().catch(() => '');
     throw new RetryableProviderError(
       `OpenDota не приняла запрос разбора: HTTP ${response.status}${responseSuffix(response)}.`,
-      retryAfterFromResponse(response, body, 300)
+      retryAfterFromResponse(response, body)
     );
   }
 }
@@ -438,7 +439,7 @@ async function obtainVerifiableMatch() {
     if (proof.parsed) return match;
   }
 
-  throw new RetryableProviderError('OpenDota ещё не закончила разбор реплея.', 300);
+  throw new RetryableProviderError('OpenDota ещё не закончила разбор реплея.');
 }
 
 logEvent('verification', 'start', {
@@ -471,13 +472,13 @@ try {
   const retryable = error instanceof RetryableProviderError;
   logEvent('verification', 'failed', {
     retryable,
-    retryAfter: retryable ? error.retryAfter : 300,
+    retryAfter: retryable ? error.retryAfter : VERIFICATION_RETRY_SECONDS,
     ...errorDetails(error)
   });
   await callback({
     status: retryable ? 'retry' : 'error',
     message: error instanceof Error ? error.message : String(error),
-    retryAfter: retryable ? error.retryAfter : 300
+    retryAfter: retryable ? error.retryAfter : VERIFICATION_RETRY_SECONDS
   });
   if (!retryable) throw error;
 }
