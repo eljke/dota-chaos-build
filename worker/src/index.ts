@@ -40,7 +40,8 @@ const VERIFICATION_JOB_SECONDS = 20 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
-const RULES_VERSION = '1.8.2';
+const VERIFICATION_RETRY_SECONDS = 60;
+const RULES_VERSION = '1.8.3';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -425,7 +426,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.8.2',
+      'User-Agent': 'dota-chaos-ranked-worker/1.8.3',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -629,7 +630,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   }
 
   if (callbackStatus === 'retry' || callbackStatus === 'error') {
-    const retryAfter = Math.max(15, Math.min(3600, Number(value.retryAfter || 300)));
+    const retryAfter = Math.max(15, Math.min(3600, Number(value.retryAfter || VERIFICATION_RETRY_SECONDS)));
     const status: VerificationJobStatus = callbackStatus === 'retry' ? 'retry' : 'error';
     await env.DB.batch([
       env.DB.prepare('UPDATE verification_jobs SET status = ?, message = ?, updated_at = ? WHERE id = ?')
@@ -657,7 +658,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
 
   const proof = verifyMatch({ match: value.match, attempt: verificationAttempt(attempt), accountId: user.account_id });
   if (!proof.parsed) {
-    const retryAfter = 300;
+    const retryAfter = VERIFICATION_RETRY_SECONDS;
     await env.DB.batch([
       env.DB.prepare("UPDATE verification_jobs SET status = 'retry', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
         .bind('Реплей ещё не содержит журнал покупок.', JSON.stringify({ errorCodes: proof.errorCodes, errors: proof.errors }), now, job.id),

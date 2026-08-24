@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=1.8.2';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.8.2';
+import { getLocale, modifierText, t } from './i18n.js?v=1.8.3';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.8.3';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
