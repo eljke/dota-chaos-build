@@ -3,9 +3,9 @@ import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
-const USER_AGENT = 'dota-chaos-ranked-verifier/1.8.0 (+https://github.com/eljke/dota-chaos-build)';
-const POLL_DELAYS_MS = [15_000, 30_000, 60_000, 90_000, 120_000];
-const OPENDOTA_RETRY_DELAYS_MS = [0, 30_000];
+const USER_AGENT = 'dota-chaos-ranked-verifier/1.8.1 (+https://github.com/eljke/dota-chaos-build)';
+const POLL_DELAYS_MS = [30_000];
+const OPENDOTA_RETRY_DELAYS_MS = [0];
 const OPENDOTA_TIMEOUT_MS = 35_000;
 const OPENDOTA_TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);
 const RESPONSE_BODY_LOG_LIMIT = 1_000;
@@ -421,17 +421,13 @@ async function obtainVerifiableMatch() {
     if (basicProof.parsed) return match;
   }
 
-  if (match?.ranked_data_source === 'stratz') {
-    logEvent('verification', 'parse_request_skipped', { provider: 'stratz' });
-  } else {
-    try {
-      await requestParse();
-    } catch (error) {
-      logEvent('verification', 'parse_request_failed', {
-        fallback: 'stratz polling',
-        ...errorDetails(error)
-      });
-    }
+  try {
+    await requestParse();
+  } catch (error) {
+    logEvent('verification', 'parse_request_failed', {
+      fallback: 'single provider poll',
+      ...errorDetails(error)
+    });
   }
 
   for (const delay of POLL_DELAYS_MS) {
