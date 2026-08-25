@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=1.8.3';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.8.3';
+import { getLocale, modifierText, t } from './i18n.js?v=1.9.0';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.9.0';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
@@ -43,6 +43,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     eligibility: el('#rankedEligibility'), eligibilityTime: el('#rankedEligibilityTime'),
     reroll: el('#rankedRerollButton'), cancel: el('#rankedCancelButton'),
     match: el('#rankedMatchId'), submit: el('#rankedSubmitButton'), status: el('#rankedStatus'),
+    queue: el('#rankedVerificationQueue'), queueList: el('#rankedVerificationQueueList'),
     board: el('#rankedLeaderboard'), boardModes: [...document.querySelectorAll('[data-ranked-board-mode]')],
     cancelDialog: el('#rankedCancelDialog'), cancelPenaltyText: el('#rankedCancelPenaltyText'),
     cancelClose: el('#rankedCancelClose'), cancelKeep: el('#rankedCancelKeep'), cancelConfirm: el('#rankedCancelConfirm')
@@ -58,6 +59,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   let verificationPollTimer = null;
   let countdownTimer = null;
   let leaderboardMode = 'normal';
+  let verificationQueue = [];
+  let queuePollTimer = null;
 
   function setView(view) {
     const target = ['ranked', 'stats'].includes(view) ? view : 'random';
@@ -248,11 +251,54 @@ export async function initRanked({ onMessage = () => {} } = {}) {
 
   function render() {
     renderControls();
+    renderVerificationQueue();
     ui.boardModes.forEach(button => {
       const active = button.dataset.rankedBoardMode === leaderboardMode;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
+  }
+
+  function queueStatus(job) {
+    const key = ['queued', 'running', 'retry', 'verified', 'rejected'].includes(job.status) ? job.status : 'error';
+    return t(`ranked.queue${key[0].toUpperCase()}${key.slice(1)}`);
+  }
+
+  function renderVerificationQueue() {
+    ui.queue.hidden = !user;
+    if (!user) return;
+    ui.queueList.innerHTML = verificationQueue.length ? verificationQueue.map(job => {
+      const modifierMissed = job.status === 'verified' && job.result?.modifierId && job.result?.modifierCompleted === false
+        ? t('ranked.modifierMissed', { modifier: t(`modifier.${job.result.modifierId}.name`) }) : '';
+      return `
+      <li data-status="${escapeHtml(job.status)}">
+        <strong>${escapeHtml(t('ranked.queueMatch', { matchId: job.matchId }))}${job.heroName ? ` · ${escapeHtml(job.heroName)}` : ''}</strong>
+        <span>${escapeHtml(queueStatus(job))}</span>
+        ${modifierMissed ? `<small>${escapeHtml(modifierMissed)}</small>` : ''}
+      </li>`;
+    }).join('') : `<li class="ranked-empty">${t('ranked.queueEmpty')}</li>`;
+  }
+
+  function scheduleQueuePolling() {
+    if (queuePollTimer) clearTimeout(queuePollTimer);
+    const pending = verificationQueue.some(job => ['queued', 'running', 'retry'].includes(job.status));
+    queuePollTimer = user ? setTimeout(loadVerificationQueue, pending ? 5000 : 60000) : null;
+  }
+
+  async function loadVerificationQueue() {
+    if (!user) return;
+    try {
+      const previous = new Map(verificationQueue.map(job => [job.jobId, job.status]));
+      const data = await request('/verification-queue');
+      verificationQueue = Array.isArray(data.jobs) ? data.jobs : [];
+      const newlyVerified = verificationQueue.some(job => job.status === 'verified' && previous.get(job.jobId) !== 'verified');
+      renderVerificationQueue();
+      if (newlyVerified) await loadLeaderboard();
+    } catch {
+      // The queue is informational; a transient refresh error must not interrupt a run.
+    } finally {
+      scheduleQueuePolling();
+    }
   }
 
   async function loadLeaderboard() {
@@ -309,6 +355,8 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     token = '';
     user = null;
     attempt = null;
+    verificationQueue = [];
+    if (queuePollTimer) clearTimeout(queuePollTimer);
     verificationRetryUntil = 0;
     verificationJob = null;
     stopVerificationPolling();
@@ -364,7 +412,14 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       method: 'POST',
       body: JSON.stringify({ matchId: ui.match.value.trim() })
     });
-    await applyVerificationStatus(data);
+    verificationQueue = [data, ...verificationQueue.filter(job => job.jobId !== data.jobId)];
+    attempt = null;
+    verificationJob = null;
+    verificationRetryUntil = 0;
+    stopVerificationPolling();
+    ui.match.value = '';
+    setStatus(t('ranked.queuedFree'), 'ok');
+    await loadVerificationQueue();
   }, t('ranked.queueing')));
 
   const code = new URL(location.href).searchParams.get('steam_code');
@@ -395,6 +450,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
         const verification = await request(`/attempts/${attempt.id}/verification`);
         await applyVerificationStatus(verification);
       }
+      await loadVerificationQueue();
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       token = '';
@@ -411,6 +467,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   window.addEventListener('dcb:localechange', () => {
     render();
     loadLeaderboard();
+    renderVerificationQueue();
     if (!user) setStatus(t('ranked.loginHint'));
     else if (verificationIsActive()) setStatus(t('ranked.checking'));
   });

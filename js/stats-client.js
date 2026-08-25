@@ -1,5 +1,5 @@
-import { modifierText, t } from './i18n.js?v=1.8.3';
-import { rankedRequest, sessionToken } from './ranked-api.js?v=1.8.3';
+import { modifierText, t } from './i18n.js?v=1.9.0';
+import { rankedRequest, sessionToken } from './ranked-api.js?v=1.9.0';
 
 const escapeHtml = value => {
   const node = document.createElement('span');

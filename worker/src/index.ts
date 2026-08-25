@@ -17,6 +17,7 @@ type VerificationJobRow = {
   id: string; attempt_id: string; attempt_updated_at: number; steam_id: string; match_id: string;
   status: VerificationJobStatus; message: string; result_json: string | null; created_at: number; updated_at: number; expires_at: number;
 };
+type QueuedVerificationJobRow = VerificationJobRow & { account_id: number };
 type GithubVerifierConfig = { token: string; repository: string; workflow: string; ref: string };
 type AttemptRow = {
   id: string; steam_id: string; mode: 'normal' | 'turbo'; order_required: number;
@@ -36,12 +37,12 @@ const ATTEMPT_SECONDS = 24 * 60 * 60;
 const CANCEL_COOLDOWN_SECONDS = 60;
 const CANCEL_PENALTY_ROLLS = 1;
 const MATCH_GUARD_SECONDS = { normal: 60, turbo: 60 } as const;
-const VERIFICATION_JOB_SECONDS = 20 * 60;
+const VERIFICATION_JOB_SECONDS = 2 * 60 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '1.8.3';
+const RULES_VERSION = '1.9.0';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -372,13 +373,6 @@ async function claimVerificationRequest(attemptId: string, steamId: string, env:
   throw new HttpError(429, `Повторная проверка будет доступна через ${retryAfter} сек.`, 'verification_cooldown', { retryAfter });
 }
 
-async function setVerificationCooldown(attemptId: string, seconds: number, env: Env): Promise<void> {
-  const bounded = Math.max(1, Math.min(24 * 60 * 60, Math.ceil(Number(seconds) || VERIFICATION_REQUEST_COOLDOWN_SECONDS)));
-  await env.DB.prepare(`UPDATE attempts SET verification_retry_at = MAX(verification_retry_at, ?)
-    WHERE id = ? AND status = 'committed'`)
-    .bind(nowSeconds() + bounded, attemptId).run();
-}
-
 function getGithubVerifierConfig(env: Env): GithubVerifierConfig {
   const values = env as Env & {
     GITHUB_ACTIONS_TOKEN?: string;
@@ -426,7 +420,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.8.3',
+      'User-Agent': 'dota-chaos-ranked-worker/1.9.0',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -450,14 +444,14 @@ async function expireVerificationJobs(attemptId: string, env: Env): Promise<void
   const now = nowSeconds();
   await env.DB.prepare(`UPDATE verification_jobs
     SET status = 'error', message = ?, updated_at = ?
-    WHERE attempt_id = ? AND status IN ('queued', 'running') AND expires_at <= ?`)
-    .bind('Проверка превысила лимит времени. Запустите её повторно.', now, attemptId, now).run();
+    WHERE attempt_id = ? AND status IN ('queued', 'running', 'retry') AND expires_at <= ?`)
+    .bind('Не удалось дождаться данных матча. Проверку можно отправить заново.', now, attemptId, now).run();
 }
 
 async function activeVerificationJob(attemptId: string, env: Env): Promise<VerificationJobRow | null> {
   await expireVerificationJobs(attemptId, env);
   return env.DB.prepare(`SELECT * FROM verification_jobs
-    WHERE attempt_id = ? AND status IN ('queued', 'running') AND expires_at > ?
+    WHERE attempt_id = ? AND status IN ('queued', 'running', 'retry') AND expires_at > ?
     ORDER BY created_at DESC LIMIT 1`)
     .bind(attemptId, nowSeconds()).first<VerificationJobRow>();
 }
@@ -491,6 +485,73 @@ function verificationJobPayload(job: VerificationJobRow, attempt?: AttemptRow | 
     result: parseJobResult(job),
     updatedAt: job.updated_at
   };
+}
+
+function verificationRetryDelay(job: VerificationJobRow): number {
+  const age = Math.max(0, nowSeconds() - job.created_at);
+  if (age < 10 * 60) return 60;
+  if (age < 30 * 60) return 3 * 60;
+  return 10 * 60;
+}
+
+async function handleVerificationQueue(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const now = nowSeconds();
+  await env.DB.prepare(`UPDATE verification_jobs SET status = 'error', message = ?, updated_at = ?
+    WHERE steam_id = ? AND status IN ('queued', 'running', 'retry') AND expires_at <= ?`)
+    .bind('Не удалось дождаться данных матча. Проверку можно отправить заново.', now, user.steam_id, now).run();
+  const { results } = await env.DB.prepare(`SELECT verification_jobs.* FROM verification_jobs
+    WHERE steam_id = ? AND created_at > ?
+      AND NOT EXISTS (SELECT 1 FROM verification_jobs AS newer
+        WHERE newer.attempt_id = verification_jobs.attempt_id AND newer.created_at > verification_jobs.created_at)
+    ORDER BY created_at DESC LIMIT 10`)
+    .bind(user.steam_id, now - 24 * 60 * 60).all<VerificationJobRow>();
+  const jobs = await Promise.all(results.map(async job => {
+    const attempt = await getAttemptById(job.attempt_id, env);
+    return { ...verificationJobPayload(job, attempt), mode: attempt?.mode || 'normal', heroName: attempt?.hero_name || '' };
+  }));
+  return json({ jobs }, 200, env);
+}
+
+async function processVerificationQueue(env: Env): Promise<void> {
+  const now = nowSeconds();
+  await env.DB.prepare(`UPDATE verification_jobs SET status = 'error', message = ?, updated_at = ?
+    WHERE status IN ('queued', 'running', 'retry') AND expires_at <= ?`)
+    .bind('Не удалось дождаться данных матча. Проверку можно отправить заново.', now, now).run();
+  const { results } = await env.DB.prepare(`SELECT verification_jobs.*, users.account_id
+    FROM verification_jobs
+    JOIN attempts ON attempts.id = verification_jobs.attempt_id
+    JOIN users ON users.steam_id = verification_jobs.steam_id
+    WHERE verification_jobs.status = 'retry' AND verification_jobs.expires_at > ?
+      AND attempts.status IN ('committed', 'expired')
+      AND attempts.updated_at = verification_jobs.attempt_updated_at
+      AND attempts.verification_retry_at <= ?
+      AND NOT EXISTS (SELECT 1 FROM verification_jobs AS newer
+        WHERE newer.attempt_id = verification_jobs.attempt_id AND newer.created_at > verification_jobs.created_at)
+    ORDER BY verification_jobs.updated_at LIMIT 5`)
+    .bind(now, now).all<QueuedVerificationJobRow>();
+
+  for (const job of results) {
+    const claimed = await env.DB.prepare(`UPDATE verification_jobs SET status = 'queued', message = ?, updated_at = ?
+      WHERE id = ? AND status = 'retry'`).bind('Повторная проверка поставлена в очередь.', now, job.id).run();
+    if (claimed.meta.changes !== 1) continue;
+    const attempt = await getAttemptById(job.attempt_id, env);
+    if (!attempt) continue;
+    try {
+      await dispatchVerificationJob({ ...job, status: 'queued', updated_at: now }, attempt, job.account_id, env);
+      console.log(JSON.stringify({ message: 'verification retry dispatched', jobId: job.id, matchId: job.match_id }));
+    } catch (error) {
+      const retryAt = nowSeconds() + VERIFICATION_RETRY_SECONDS;
+      await env.DB.batch([
+        env.DB.prepare("UPDATE verification_jobs SET status = 'retry', message = ?, updated_at = ? WHERE id = ?")
+          .bind('Не удалось запустить проверку. Повторим автоматически.', nowSeconds(), job.id),
+        env.DB.prepare('UPDATE attempts SET verification_retry_at = ? WHERE id = ?')
+          .bind(retryAt, job.attempt_id)
+      ]);
+      console.error(JSON.stringify({ message: 'verification retry dispatch failed', jobId: job.id,
+        error: error instanceof Error ? error.message : String(error) }));
+    }
+  }
 }
 
 async function ensureNoActiveVerification(attemptId: string, env: Env): Promise<void> {
@@ -630,13 +691,13 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   }
 
   if (callbackStatus === 'retry' || callbackStatus === 'error') {
-    const retryAfter = Math.max(15, Math.min(3600, Number(value.retryAfter || VERIFICATION_RETRY_SECONDS)));
+    const retryAfter = Math.max(verificationRetryDelay(job), Math.min(3600, Number(value.retryAfter || VERIFICATION_RETRY_SECONDS)));
     const status: VerificationJobStatus = callbackStatus === 'retry' ? 'retry' : 'error';
     await env.DB.batch([
       env.DB.prepare('UPDATE verification_jobs SET status = ?, message = ?, updated_at = ? WHERE id = ?')
         .bind(status, message || 'Проверка временно не завершена.', now, job.id),
       env.DB.prepare(`UPDATE attempts SET verification_retry_at = MAX(verification_retry_at, ?)
-        WHERE id = ? AND status = 'committed'`)
+        WHERE id = ? AND status IN ('committed', 'expired')`)
         .bind(now + retryAfter, job.attempt_id)
     ]);
     return json({ ok: true, status }, 200, env);
@@ -647,7 +708,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   }
 
   const attempt = await getAttemptById(job.attempt_id, env);
-  if (!attempt || attempt.status !== 'committed' || attempt.updated_at !== job.attempt_updated_at) {
+  if (!attempt || !['committed', 'expired'].includes(attempt.status) || attempt.updated_at !== job.attempt_updated_at) {
     await env.DB.prepare("UPDATE verification_jobs SET status = 'stale', message = ?, updated_at = ? WHERE id = ?")
       .bind('Ranked-сборка изменилась до завершения проверки.', now, job.id).run();
     return json({ ok: true, status: 'stale' }, 200, env);
@@ -658,11 +719,11 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
 
   const proof = verifyMatch({ match: value.match, attempt: verificationAttempt(attempt), accountId: user.account_id });
   if (!proof.parsed) {
-    const retryAfter = VERIFICATION_RETRY_SECONDS;
+    const retryAfter = verificationRetryDelay(job);
     await env.DB.batch([
       env.DB.prepare("UPDATE verification_jobs SET status = 'retry', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
         .bind('Реплей ещё не содержит журнал покупок.', JSON.stringify({ errorCodes: proof.errorCodes, errors: proof.errors }), now, job.id),
-      env.DB.prepare('UPDATE attempts SET verification_retry_at = ? WHERE id = ? AND status = \'committed\'')
+      env.DB.prepare("UPDATE attempts SET verification_retry_at = ? WHERE id = ? AND status IN ('committed', 'expired')")
         .bind(now + retryAfter, attempt.id)
     ]);
     return json({ ok: true, status: 'retry' }, 200, env);
@@ -673,7 +734,7 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
     await env.DB.batch([
       env.DB.prepare("UPDATE verification_jobs SET status = 'rejected', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
         .bind(proof.errors.join(' ').slice(0, 500), JSON.stringify(result), now, job.id),
-      env.DB.prepare('UPDATE attempts SET verification_retry_at = ? WHERE id = ? AND status = \'committed\'')
+      env.DB.prepare("UPDATE attempts SET verification_retry_at = ? WHERE id = ? AND status IN ('committed', 'expired')")
         .bind(now + VERIFICATION_REQUEST_COOLDOWN_SECONDS, attempt.id)
     ]);
     return json({ ok: true, status: 'rejected' }, 200, env);
@@ -684,11 +745,12 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   const completedItems = Number(proof.completedItems || 0);
   const totalItems = Number(proof.totalItems || 6);
   const completionValue = Number(proof.completionMultiplier || 0);
+  const modifierCompleted = proof.modifierCompleted === true;
   const score = calculateScore({
     rerolls: attempt.roll_count,
     cancelPenalties,
     orderRequired: attempt.order_required === 1,
-    modifierMultiplier: modifier?.multiplier,
+    modifierMultiplier: modifierCompleted ? modifier?.multiplier : 1,
     completedItems,
     totalItems
   });
@@ -698,6 +760,8 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
     completedItems,
     totalItems,
     completionMultiplier: completionValue,
+    modifierCompleted,
+    modifierId: modifier?.id || null,
     evidence: proof.evidence
   };
 
@@ -710,10 +774,11 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
         .bind(crypto.randomUUID(), attempt.id, user.steam_id, matchId, score, attempt.roll_count, cancelPenalties,
           attempt.order_required, attempt.mode, attempt.modifier_id, JSON.stringify(result), now,
           completedItems, totalItems, completionValue),
-      env.DB.prepare("UPDATE attempts SET status = 'verified', updated_at = ? WHERE id = ? AND status = 'committed' AND updated_at = ?")
+      env.DB.prepare("UPDATE attempts SET status = 'verified', updated_at = ? WHERE id = ? AND status IN ('committed', 'expired') AND updated_at = ?")
         .bind(now, attempt.id, job.attempt_updated_at),
       env.DB.prepare("UPDATE verification_jobs SET status = 'verified', message = ?, result_json = ?, updated_at = ? WHERE id = ?")
-        .bind(`Победа подтверждена: собрано ${completedItems}/${totalItems} предметов.`, JSON.stringify(result), now, job.id),
+        .bind(`Победа подтверждена: собрано ${completedItems}/${totalItems} предметов.${modifier && !modifierCompleted
+          ? ` Дополнительное условие не выполнено: ${modifier.name}.` : ''}`, JSON.stringify(result), now, job.id),
       env.DB.prepare(`INSERT INTO ranked_penalties (steam_id, mode, cancel_penalties, cooldown_until, updated_at)
         VALUES (?, ?, 0, 0, ?) ON CONFLICT(steam_id, mode) DO UPDATE SET cancel_penalties = 0,
         cooldown_until = 0, updated_at = excluded.updated_at`)
@@ -744,7 +809,10 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
   const orderRequired = body.orderRequired === true;
   const now = nowSeconds();
   let active = await env.DB.prepare(`SELECT * FROM attempts
-    WHERE steam_id = ? AND status IN ('rolling', 'committed') AND created_at > ? ORDER BY created_at DESC LIMIT 1`)
+    WHERE steam_id = ? AND status IN ('rolling', 'committed') AND created_at > ?
+      AND NOT EXISTS (SELECT 1 FROM verification_jobs WHERE verification_jobs.attempt_id = attempts.id
+        AND verification_jobs.status IN ('queued', 'running', 'retry'))
+    ORDER BY created_at DESC LIMIT 1`)
     .bind(user.steam_id, now - ATTEMPT_SECONDS).first<AttemptRow>();
   if (active?.status === 'rolling') {
     await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
@@ -760,7 +828,9 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
   }
 
   await env.DB.prepare(`UPDATE attempts SET status = 'expired', updated_at = ?
-    WHERE steam_id = ? AND status IN ('rolling', 'committed')`).bind(now, user.steam_id).run();
+    WHERE steam_id = ? AND status IN ('rolling', 'committed')
+      AND NOT EXISTS (SELECT 1 FROM verification_jobs WHERE verification_jobs.attempt_id = attempts.id
+        AND verification_jobs.status IN ('queued', 'running', 'retry'))`).bind(now, user.steam_id).run();
   const pool = await getPool(env, ctx);
   const roll = createRoll(pool, mode, orderRequired);
   const id = crypto.randomUUID();
@@ -839,7 +909,7 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
   const job: VerificationJobRow = {
     id: crypto.randomUUID(),
     attempt_id: attempt.id,
-    attempt_updated_at: attempt.updated_at,
+    attempt_updated_at: now,
     steam_id: user.steam_id,
     match_id: matchId,
     status: 'queued',
@@ -857,6 +927,8 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`)
         .bind(job.id, job.attempt_id, job.attempt_updated_at, job.steam_id, job.match_id, job.status, job.message,
           job.created_at, job.updated_at, job.expires_at),
+      env.DB.prepare("UPDATE attempts SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'committed' AND updated_at = ?")
+        .bind(now, attempt.id, attempt.updated_at),
       env.DB.prepare('DELETE FROM verification_jobs WHERE expires_at <= ?').bind(now)
     ]);
   } catch (error) {
@@ -866,15 +938,15 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
   }
 
   try {
-    await dispatchVerificationJob(job, attempt, user.account_id, env);
+    await dispatchVerificationJob(job, { ...attempt, status: 'expired', updated_at: now }, user.account_id, env);
   } catch (error) {
-    await env.DB.prepare("UPDATE verification_jobs SET status = 'error', message = ?, updated_at = ? WHERE id = ?")
-      .bind(error instanceof Error ? error.message.slice(0, 500) : 'GitHub dispatch failed.', nowSeconds(), job.id).run();
-    await setVerificationCooldown(attempt.id, 60, env);
-    if (error instanceof HttpError) {
-      throw new HttpError(error.status, error.message, error.code, { ...error.details, retryAfter: 60 });
-    }
-    throw new HttpError(502, 'Не удалось запустить GitHub Actions. Повторите через минуту.', 'github_dispatch_failed', { retryAfter: 60 });
+    await env.DB.batch([
+      env.DB.prepare("UPDATE verification_jobs SET status = 'retry', message = ?, updated_at = ? WHERE id = ?")
+        .bind('Не удалось запустить проверку. Повторим автоматически.', nowSeconds(), job.id),
+      env.DB.prepare('UPDATE attempts SET verification_retry_at = ? WHERE id = ?').bind(nowSeconds() + 60, attempt.id)
+    ]);
+    job.status = 'retry';
+    job.message = 'Не удалось запустить проверку. Повторим автоматически.';
   }
 
   return json(verificationJobPayload(job, attempt), 202, env);
@@ -962,10 +1034,13 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (request.method === 'GET' && url.pathname === '/me') return json({ user: await getUser(request, env) }, 200, env);
   if (request.method === 'GET' && url.pathname === '/leaderboard') return handleLeaderboard(url, env);
   if (request.method === 'GET' && url.pathname === '/stats') return handleStats(request, url, env);
+  if (request.method === 'GET' && url.pathname === '/verification-queue') return handleVerificationQueue(request, env);
   if (request.method === 'GET' && url.pathname === '/attempts/active') {
     const user = await requireUser(request, env);
     let active = await env.DB.prepare(`SELECT * FROM attempts WHERE steam_id = ? AND status IN ('rolling', 'committed')
-      AND created_at > ? ORDER BY created_at DESC LIMIT 1`).bind(user.steam_id, nowSeconds() - ATTEMPT_SECONDS).first<AttemptRow>();
+      AND created_at > ? AND NOT EXISTS (SELECT 1 FROM verification_jobs
+        WHERE verification_jobs.attempt_id = attempts.id AND verification_jobs.status IN ('queued', 'running', 'retry'))
+      ORDER BY created_at DESC LIMIT 1`).bind(user.steam_id, nowSeconds() - ATTEMPT_SECONDS).first<AttemptRow>();
     if (active?.status === 'rolling') {
       const now = nowSeconds();
       await env.DB.prepare("UPDATE attempts SET status = 'committed', committed_at = ?, updated_at = ? WHERE id = ? AND status = 'rolling'")
@@ -1006,5 +1081,8 @@ export default {
       }));
       return json({ error: message, code: known ? error.code : 'internal_error', ...(known ? error.details : {}) }, known ? error.status : 500, env);
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await processVerificationQueue(env);
   }
 } satisfies ExportedHandler<Env>;

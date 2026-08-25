@@ -56,11 +56,13 @@ test('unparsed wrong match is rejected without requesting replay data', () => {
   assert.ok(result.errors.some(error => error.includes('не выданный герой')));
 });
 
-test('match verification rejects a failed assigned modifier', () => {
+test('failed modifier keeps the win eligible without its bonus', () => {
   const challenged = { ...attempt, modifier_id: 'tower-pressure' };
   const result = verifyMatch({ match, attempt: challenged, accountId: 42 });
-  assert.equal(result.ok, false);
-  assert.ok(result.errors.some(error => error.includes('Осадный контракт')));
+  assert.equal(result.ok, true);
+  assert.equal(result.modifierCompleted, false);
+  assert.equal(result.evidence.modifier.ok, false);
+  assert.equal(calculateScore({ rerolls: 0, orderRequired: false, modifierMultiplier: 1 }), 1000);
 });
 
 test('match must start after the anti-abuse guard window', () => {

@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.8.3">
+  <link rel="stylesheet" href="styles.css?v=1.9.0">
   <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -277,6 +277,12 @@
           </div>
         </article>
 
+        <section class="ranked-queue dota-panel" id="rankedVerificationQueue" hidden>
+          <div class="ranked-section-title"><span>⌛</span><div><small data-i18n="ranked.queueKicker">ПРОВЕРКА МАТЧЕЙ</small><h2 data-i18n="ranked.queueTitle">Очередь</h2></div></div>
+          <p data-i18n="ranked.queueHint">Проверка идёт в фоне. Пока она работает, можно получить новую сборку и сыграть следующий матч.</p>
+          <ol id="rankedVerificationQueueList"></ol>
+        </section>
+
         <p class="ranked-status" id="rankedStatus" aria-live="polite" data-i18n="ranked.loginHint">Войдите через Steam, чтобы начать попытку.</p>
       </div>
 
@@ -365,6 +371,14 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>1.9.0</h3><time datetime="2026-08-25" data-i18n="release.1.9.0.date">25 августа 2026</time></header>
+        <ul>
+          <li data-i18n="release.1.9.0.a">Проверка матча теперь идёт в фоне — следующую сборку можно получить сразу.</li>
+          <li data-i18n="release.1.9.0.b">Матчи, данные которых ещё готовятся, автоматически возвращаются в очередь.</li>
+          <li data-i18n="release.1.9.0.c">Дополнительное условие стало бонусом: победа засчитывается и без него.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>1.8.3</h3><time datetime="2026-08-25" data-i18n="release.1.8.3.date">25 августа 2026</time></header>
         <ul>
@@ -503,6 +517,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.8.3"></script>
+  <script type="module" src="app.js?v=1.9.0"></script>
 </body>
 </html>
