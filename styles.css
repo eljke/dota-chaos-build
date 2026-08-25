@@ -1201,6 +1201,7 @@ body[data-app-view="stats"] .app-shell { display: none; }
 .ranked-submit > label small { color: #69767d; font-size: 8px; }
 .ranked-submit > div { margin-top: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
 .ranked-submit .primary-button { min-width: 220px; min-height: 44px; }
+.ranked-submit .ranked-defer { margin-top: 9px; }
 .ranked-status { min-height: 20px; margin: 0; padding: 0 4px; color: #839099; font-size: 10px; }
 .ranked-status[data-kind="ok"] { color: #7faa79; }
 .ranked-status[data-kind="error"] { color: #d47768; }
@@ -1212,6 +1213,9 @@ body[data-app-view="stats"] .app-shell { display: none; }
 .ranked-queue li strong { overflow: hidden; color: #b9c3c8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .ranked-queue li span { color: #8b989e; font-size: 9px; text-align: right; }
 .ranked-queue li small { grid-column: 1 / -1; color: #657279; font-size: 8px; line-height: 1.45; }
+.ranked-queue-submit { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.ranked-queue-submit input { min-width: 0; padding: 9px 10px; border: 1px solid #354047; background: #10171b; color: #c5cdd1; font: inherit; font-size: 10px; }
+.ranked-queue-submit .secondary-button { min-height: 36px; }
 .ranked-queue li[data-status="verified"] span { color: #7faa79; }
 .ranked-queue li[data-status="rejected"], .ranked-queue li[data-status="error"] span { color: #d47768; }
 .ranked-queue .ranked-empty { display: block; color: #657279; font-size: 9px; text-align: center; }

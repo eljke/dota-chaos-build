@@ -1,15 +1,15 @@
 'use strict';
 
-import { generateBuild, pick, seededRandom } from './js/generator.js?v=1.9.0';
-import { decodeBuildCode, encodeBuildCode } from './js/build-code.js?v=1.9.0';
-import { MODIFIERS as CONTRACTS } from './js/modifiers.js?v=1.9.0';
-import { applyTranslations, getLocale, initI18n, modifierText, t } from './js/i18n.js?v=1.9.0';
-import { initRanked } from './js/ranked-client.js?v=1.9.0';
-import { initStats } from './js/stats-client.js?v=1.9.0';
+import { generateBuild, pick, seededRandom } from './js/generator.js?v=1.9.1';
+import { decodeBuildCode, encodeBuildCode } from './js/build-code.js?v=1.9.1';
+import { MODIFIERS as CONTRACTS } from './js/modifiers.js?v=1.9.1';
+import { applyTranslations, getLocale, initI18n, modifierText, t } from './js/i18n.js?v=1.9.1';
+import { initRanked } from './js/ranked-client.js?v=1.9.1';
+import { initStats } from './js/stats-client.js?v=1.9.1';
 import {
   BOOT_KEYS, BOOT_KEY_SET, ITEM_KEY_ALIASES, ITEM_POOL_KEYS,
   MELEE_ONLY, RANGED_ONLY, isItemCompatible
-} from './js/item-rules.js?v=1.9.0';
+} from './js/item-rules.js?v=1.9.1';
 
 const CONFIG = {
   patchFallback: '7.41e',

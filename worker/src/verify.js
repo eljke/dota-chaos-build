@@ -108,6 +108,10 @@ export function calculateScore({
   return Math.round(1000 * modifierMultiplier * orderMultiplier * buildMultiplier / penaltyDivisor);
 }
 
+export function canSubmitAttempt(attempt) {
+  return attempt?.status === 'committed' || (attempt?.status === 'expired' && Number(attempt?.deferred_at) > 0);
+}
+
 export function verifyModifier({ modifierId, match, player, attempt }) {
   const modifier = modifierById(modifierId);
   if (!modifier) return { ok: !modifierId, code: modifierId ? 'unknown_modifier' : null, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };

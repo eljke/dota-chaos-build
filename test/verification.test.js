@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateScore, completionMultiplier, verifyMatch } from '../worker/src/verify.js';
+import { calculateScore, canSubmitAttempt, completionMultiplier, verifyMatch } from '../worker/src/verify.js';
 
 const items = [
   { id: 50, key: 'phase_boots', sourceKey: 'phase_boots', name: 'Phase Boots' },
@@ -24,6 +24,12 @@ test('score accounts for order and every seen build', () => {
   assert.equal(calculateScore({ rerolls: 1, orderRequired: true }), 600);
   assert.equal(calculateScore({ rerolls: 4, orderRequired: false }), 200);
   assert.equal(calculateScore({ rerolls: 0, cancelPenalties: 1, orderRequired: false }), 500);
+});
+
+test('deferred attempt accepts a match id later', () => {
+  assert.equal(canSubmitAttempt({ status: 'committed', deferred_at: 0 }), true);
+  assert.equal(canSubmitAttempt({ status: 'expired', deferred_at: 123 }), true);
+  assert.equal(canSubmitAttempt({ status: 'expired', deferred_at: 0 }), false);
 });
 
 test('valid match proves hero, victory, inventory and order', () => {
