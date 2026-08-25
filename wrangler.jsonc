@@ -5,6 +5,7 @@
   "compatibility_date": "2026-08-06",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "SITE_ORIGIN": "https://eljke.github.io",
     "SITE_URL": "https://eljke.github.io/dota-chaos-build/",

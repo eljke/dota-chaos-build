@@ -235,7 +235,6 @@ export function verifyMatch({ match, attempt, accountId }) {
   }
 
   const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
-  if (!modifierProof.ok && modifierProof.error) fail(modifierProof.code || 'modifier_failed', modifierProof.error);
 
   const totalItems = items.length || 6;
   return {
@@ -247,6 +246,7 @@ export function verifyMatch({ match, attempt, accountId }) {
     completedItems,
     totalItems,
     completionMultiplier: completionMultiplier(completedItems, totalItems),
+    modifierCompleted: modifierProof.ok,
     evidence: {
       ...basicEvidence,
       completedItems,
@@ -255,7 +255,7 @@ export function verifyMatch({ match, attempt, accountId }) {
       matchedItems,
       missingItems: matchedItems.filter(item => !item.matched).map(item => ({ id: item.id, name: item.name })),
       finalItemIds: finalIds,
-      modifier: modifierProof.evidence
+      modifier: modifierProof.evidence ? { ...modifierProof.evidence, ok: modifierProof.ok } : null
     }
   };
 }
