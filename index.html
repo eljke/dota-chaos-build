@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.9.0">
+  <link rel="stylesheet" href="styles.css?v=1.9.1">
   <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -274,6 +274,7 @@
           <div class="ranked-submit">
             <label for="rankedMatchId"><span data-i18n="ranked.submitKicker">ПОСЛЕ ПОБЕДЫ</span><small data-i18n="ranked.submitHint">Вставьте Match ID завершённой игры</small></label>
             <div><input id="rankedMatchId" inputmode="numeric" autocomplete="off" placeholder="Например, 8123456789" data-i18n-placeholder="ranked.matchPlaceholder"><button class="primary-button" id="rankedSubmitButton" type="button" data-i18n="ranked.submit">ПРОВЕРИТЬ МАТЧ</button></div>
+            <button class="text-button ranked-defer" id="rankedDeferButton" type="button" data-i18n="ranked.defer">Match ID появится позже</button>
           </div>
         </article>
 
@@ -371,6 +372,13 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>1.9.1</h3><time datetime="2026-08-25" data-i18n="release.1.9.1.date">25 августа 2026</time></header>
+        <ul>
+          <li data-i18n="release.1.9.1.a">Сыгранную сборку можно сохранить без Match ID и сразу начать следующую попытку.</li>
+          <li data-i18n="release.1.9.1.b">Когда Dota вернёт ID, его можно добавить к сохранённой попытке прямо в очереди.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>1.9.0</h3><time datetime="2026-08-25" data-i18n="release.1.9.0.date">25 августа 2026</time></header>
         <ul>
@@ -517,6 +525,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.9.0"></script>
+  <script type="module" src="app.js?v=1.9.1"></script>
 </body>
 </html>

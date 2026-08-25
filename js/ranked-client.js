@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=1.9.0';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.9.0';
+import { getLocale, modifierText, t } from './i18n.js?v=1.9.1';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.9.1';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
@@ -42,7 +42,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     rerolls: el('#rankedRerolls'), cancelPenalties: el('#rankedCancelPenalties'), score: el('#rankedScore'),
     eligibility: el('#rankedEligibility'), eligibilityTime: el('#rankedEligibilityTime'),
     reroll: el('#rankedRerollButton'), cancel: el('#rankedCancelButton'),
-    match: el('#rankedMatchId'), submit: el('#rankedSubmitButton'), status: el('#rankedStatus'),
+    match: el('#rankedMatchId'), submit: el('#rankedSubmitButton'), defer: el('#rankedDeferButton'), status: el('#rankedStatus'),
     queue: el('#rankedVerificationQueue'), queueList: el('#rankedVerificationQueueList'),
     board: el('#rankedLeaderboard'), boardModes: [...document.querySelectorAll('[data-ranked-board-mode]')],
     cancelDialog: el('#rankedCancelDialog'), cancelPenaltyText: el('#rankedCancelPenaltyText'),
@@ -245,6 +245,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
         ? t('ranked.cooldown', { time: formatCountdown(verificationWait) })
         : t('ranked.submit');
     ui.match.disabled = busy || !attempt || verificationActive;
+    ui.defer.disabled = busy || !attempt || verificationActive;
     renderUser();
     renderAttempt();
   }
@@ -260,6 +261,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   }
 
   function queueStatus(job) {
+    if (job.status === 'awaiting_match_id') return t('ranked.queueAwaitingMatch');
     const key = ['queued', 'running', 'retry', 'verified', 'rejected'].includes(job.status) ? job.status : 'error';
     return t(`ranked.queue${key[0].toUpperCase()}${key.slice(1)}`);
   }
@@ -270,11 +272,16 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.queueList.innerHTML = verificationQueue.length ? verificationQueue.map(job => {
       const modifierMissed = job.status === 'verified' && job.result?.modifierId && job.result?.modifierCompleted === false
         ? t('ranked.modifierMissed', { modifier: t(`modifier.${job.result.modifierId}.name`) }) : '';
+      const deferredForm = job.status === 'awaiting_match_id' ? `
+        <div class="ranked-queue-submit"><input inputmode="numeric" autocomplete="off" data-deferred-match="${escapeHtml(job.attemptId)}"
+          placeholder="${escapeHtml(t('ranked.matchPlaceholder'))}"><button class="secondary-button" type="button"
+          data-submit-deferred="${escapeHtml(job.attemptId)}">${t('ranked.submit')}</button></div>` : '';
       return `
       <li data-status="${escapeHtml(job.status)}">
         <strong>${escapeHtml(t('ranked.queueMatch', { matchId: job.matchId }))}${job.heroName ? ` · ${escapeHtml(job.heroName)}` : ''}</strong>
         <span>${escapeHtml(queueStatus(job))}</span>
         ${modifierMissed ? `<small>${escapeHtml(modifierMissed)}</small>` : ''}
+        ${deferredForm}
       </li>`;
     }).join('') : `<li class="ranked-empty">${t('ranked.queueEmpty')}</li>`;
   }
@@ -406,6 +413,26 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       ui.match.value = '';
       setStatus(t('ranked.cancelled', { count: data.cancelPenalties }), 'ok');
     }, t('ranked.cancelling'));
+  });
+  ui.defer.addEventListener('click', () => action(async () => {
+    await request(`/attempts/${attempt.id}/defer`, { method: 'POST', body: '{}' });
+    attempt = null;
+    ui.match.value = '';
+    setStatus(t('ranked.deferred'), 'ok');
+    await loadVerificationQueue();
+  }, t('ranked.deferring')));
+  ui.queueList.addEventListener('click', event => {
+    const button = event.target.closest('[data-submit-deferred]');
+    if (!button) return;
+    const attemptId = button.dataset.submitDeferred;
+    const input = ui.queueList.querySelector(`[data-deferred-match="${attemptId}"]`);
+    action(async () => {
+      await request(`/attempts/${attemptId}/submit`, {
+        method: 'POST', body: JSON.stringify({ matchId: input.value.trim() })
+      });
+      setStatus(t('ranked.queuedFree'), 'ok');
+      await loadVerificationQueue();
+    }, t('ranked.queueing'));
   });
   ui.submit.addEventListener('click', () => action(async () => {
     const data = await request(`/attempts/${attempt.id}/submit`, {
