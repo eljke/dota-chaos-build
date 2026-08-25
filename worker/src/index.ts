@@ -1,7 +1,7 @@
 import { generateBuild, seededRandom } from '../../js/generator.js';
 import { BOOT_KEYS, isItemCompatible } from '../../js/item-rules.js';
 import { eligibleModifiers, modifierById } from '../../js/modifiers.js';
-import { calculateScore, verifyMatch } from './verify.js';
+import { calculateScore, canSubmitAttempt, verifyMatch } from './verify.js';
 import { verifyVerificationSignature } from './verification-auth.js';
 import { normalizeStratzMatch } from './providers.js';
 
@@ -25,6 +25,7 @@ type AttemptRow = {
   hero_id: number; hero_key: string; hero_name: string; items_json: string; modifier_id: string | null;
   rules_version: string; data_version: string; created_at: number; updated_at: number; committed_at: number | null;
   cancel_penalties: number; verification_retry_at: number;
+  deferred_at: number;
 };
 
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
@@ -42,7 +43,7 @@ const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '1.9.0';
+const RULES_VERSION = '1.9.1';
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -420,7 +421,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/1.9.0',
+      'User-Agent': 'dota-chaos-ranked-worker/1.9.1',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -510,7 +511,18 @@ async function handleVerificationQueue(request: Request, env: Env): Promise<Resp
     const attempt = await getAttemptById(job.attempt_id, env);
     return { ...verificationJobPayload(job, attempt), mode: attempt?.mode || 'normal', heroName: attempt?.hero_name || '' };
   }));
-  return json({ jobs }, 200, env);
+  const { results: deferred } = await env.DB.prepare(`SELECT id, mode, hero_name, deferred_at FROM attempts
+    WHERE steam_id = ? AND status = 'expired' AND deferred_at > ?
+    ORDER BY deferred_at DESC LIMIT 10`).bind(user.steam_id, now - 7 * 24 * 60 * 60)
+    .all<{ id: string; mode: 'normal' | 'turbo'; hero_name: string; deferred_at: number }>();
+  return json({ jobs: [
+    ...deferred.map(attempt => ({
+      jobId: `deferred:${attempt.id}`, attemptId: attempt.id, matchId: '', status: 'awaiting_match_id',
+      message: '', retryAfter: 0, result: null, updatedAt: attempt.deferred_at,
+      mode: attempt.mode, heroName: attempt.hero_name
+    })),
+    ...jobs
+  ] }, 200, env);
 }
 
 async function processVerificationQueue(env: Env): Promise<void> {
@@ -891,10 +903,24 @@ async function handleCancel(id: string, request: Request, env: Env): Promise<Res
   return json({ status: 'cancelled', cancelPenalties: penalty.cancel_penalties, cooldownUntil }, 200, env);
 }
 
+async function handleDefer(id: string, request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const current = await getAttempt(id, user.steam_id, env);
+  if (current.status !== 'committed') throw new HttpError(409, 'Эту попытку уже нельзя отложить.', 'defer_conflict');
+  await ensureNoActiveVerification(current.id, env);
+  const now = nowSeconds();
+  const deferred = await env.DB.prepare(`UPDATE attempts SET status = 'expired', deferred_at = ?, updated_at = ?
+    WHERE id = ? AND steam_id = ? AND status = 'committed'`)
+    .bind(now, now, current.id, user.steam_id).run();
+  if (deferred.meta.changes !== 1) throw new HttpError(409, 'Попытка уже изменилась в другой вкладке.', 'defer_conflict');
+  return json({ attemptId: current.id, status: 'awaiting_match_id', mode: current.mode,
+    heroName: current.hero_name, updatedAt: now }, 200, env);
+}
+
 async function handleSubmit(id: string, request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const attempt = await getAttempt(id, user.steam_id, env);
-  if (attempt.status !== 'committed' || !attempt.committed_at) {
+  if (!canSubmitAttempt(attempt) || !attempt.committed_at) {
     throw new HttpError(409, 'Ranked-попытка не активна.', 'attempt_not_committed');
   }
   const body = await readJson(request);
@@ -903,7 +929,7 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
 
   const existing = await activeVerificationJob(attempt.id, env);
   if (existing) return json(verificationJobPayload(existing, attempt), 202, env);
-  await claimVerificationRequest(attempt.id, user.steam_id, env);
+  if (attempt.status === 'committed') await claimVerificationRequest(attempt.id, user.steam_id, env);
 
   const now = nowSeconds();
   const job: VerificationJobRow = {
@@ -927,7 +953,8 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`)
         .bind(job.id, job.attempt_id, job.attempt_updated_at, job.steam_id, job.match_id, job.status, job.message,
           job.created_at, job.updated_at, job.expires_at),
-      env.DB.prepare("UPDATE attempts SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'committed' AND updated_at = ?")
+      env.DB.prepare(`UPDATE attempts SET status = 'expired', deferred_at = 0, updated_at = ?
+        WHERE id = ? AND status IN ('committed', 'expired') AND updated_at = ?`)
         .bind(now, attempt.id, attempt.updated_at),
       env.DB.prepare('DELETE FROM verification_jobs WHERE expires_at <= ?').bind(now)
     ]);
@@ -1056,11 +1083,12 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     return handleVerificationStatus(verificationMatch[1], request, env);
   }
 
-  const match = url.pathname.match(/^\/attempts\/([0-9a-f-]+)\/(reroll|commit|cancel|submit)$/i);
+  const match = url.pathname.match(/^\/attempts\/([0-9a-f-]+)\/(reroll|commit|cancel|defer|submit)$/i);
   if (request.method === 'POST' && match) {
     if (match[2] === 'reroll') return handleReroll(match[1], request, env, ctx);
     if (match[2] === 'commit') return handleCommit(match[1], request, env);
     if (match[2] === 'cancel') return handleCancel(match[1], request, env);
+    if (match[2] === 'defer') return handleDefer(match[1], request, env);
     return handleSubmit(match[1], request, env);
   }
   throw new HttpError(404, 'Маршрут не найден.', 'not_found');
