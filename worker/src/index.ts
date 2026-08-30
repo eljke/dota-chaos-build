@@ -36,6 +36,7 @@ type AttemptRow = {
 
 const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
 const STEAM_PLAYER_SUMMARIES = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/';
+const STEAM_TOP_LIVE = 'https://api.steampowered.com/IDOTA2Match_570/GetTopLiveGame/v1/';
 const STRATZ_API = 'https://api.stratz.com/graphql';
 const STRATZ_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const STEAM_ID_BASE = 76561197960265728n;
@@ -75,7 +76,7 @@ const STRATZ_MATCH_QUERY = `
 const STRATZ_PRO_MATCH_QUERY = `
   query ProBuildMatch($id: Long!) {
     match(id: $id) {
-      id startDateTime gameMode lobbyType leagueId
+      id startDateTime durationSeconds gameMode lobbyType leagueId
       players {
         steamAccountId playerSlot heroId position isVictory leaverStatus
         item0Id item1Id item2Id item3Id item4Id item5Id
@@ -656,40 +657,50 @@ async function fetchProMatch(matchId: string, env: Env): Promise<JsonObject | nu
   return isRecord(payload) && isRecord(payload.data) && isRecord(payload.data.match) ? payload.data.match : null;
 }
 
-async function nextPublicMatch(mode: 'normal' | 'turbo', env: Env): Promise<JsonObject | null> {
-  const response = await fetch('https://api.opendota.com/api/publicMatches', {
-    headers: { Accept: 'application/json', 'User-Agent': STRATZ_USER_AGENT }
-  });
-  if (!response.ok) throw new Error(`OpenDota public-match refresh returned ${response.status}`);
+async function discoverLiveMatches(env: Env): Promise<number> {
+  const apiKey = String((env as Env & { STEAM_API_KEY?: string }).STEAM_API_KEY || '').trim();
+  if (!apiKey) throw new Error('Steam API key is not configured');
+  const url = new URL(STEAM_TOP_LIVE);
+  url.searchParams.set('key', apiKey);
+  url.searchParams.set('partner', '0');
+  const response = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Steam live-match refresh returned ${response.status}`);
   const payload: unknown = await response.json();
-  if (!Array.isArray(payload)) return null;
-  const candidates = payload.filter(isRecord).filter(match => {
+  if (!isRecord(payload) || !Array.isArray(payload.game_list)) return 0;
+  const candidates = payload.game_list.filter(isRecord).filter(match => {
     const gameMode = Number(match.game_mode || 0);
     const lobbyType = Number(match.lobby_type || 0);
-    const highRank = Number(match.avg_rank_tier || 0) >= 75;
-    return highRank && (mode === 'turbo' ? gameMode === 23 : gameMode === 22 && lobbyType === 7);
-  }).slice(0, 20);
-  if (!candidates.length) return null;
-  const ids = candidates.map(match => String(match.match_id));
-  const placeholders = ids.map(() => '?').join(',');
-  const { results } = await env.DB.prepare(`SELECT match_id FROM pro_refresh_seen WHERE match_id IN (${placeholders})`)
-    .bind(...ids).all<{ match_id: string }>();
-  const seen = new Set(results.map(row => row.match_id));
-  return candidates.find(match => !seen.has(String(match.match_id))) || null;
+    const highMmr = Number(match.average_mmr || 0) >= 7000;
+    const publicGame = Number(match.league_id || 0) === 0;
+    return highMmr && publicGame && (gameMode === 23 || gameMode === 22 && lobbyType === 7);
+  });
+  if (!candidates.length) return 0;
+  const now = nowSeconds();
+  const statements = candidates.slice(0, 90).map(match => env.DB.prepare(`INSERT OR IGNORE INTO pro_refresh_seen
+    (match_id, mode, processed_at, sample_count) VALUES (?, ?, ?, -1)`)
+    .bind(String(match.match_id), Number(match.game_mode) === 23 ? 'turbo' : 'normal',
+      Number(match.activate_time || now)));
+  await env.DB.batch(statements);
+  return statements.length;
 }
 
 async function processProBuildRefresh(env: Env): Promise<void> {
   const now = nowSeconds();
-  const freshness = await env.DB.prepare(`SELECT
-    COALESCE(MAX(CASE WHEN mode = 'normal' THEN observed_at END), 0) AS normal_at,
-    COALESCE(MAX(CASE WHEN mode = 'turbo' THEN observed_at END), 0) AS turbo_at FROM pro_build_samples`)
-    .first<{ normal_at: number; turbo_at: number }>();
-  const mode: 'normal' | 'turbo' = Number(freshness?.normal_at || 0) <= Number(freshness?.turbo_at || 0)
-    ? 'normal' : 'turbo';
-  const candidate = await nextPublicMatch(mode, env);
-  if (!candidate) return;
-  const matchId = String(candidate.match_id);
+  const discovered = await discoverLiveMatches(env);
+  const candidate = await env.DB.prepare(`SELECT match_id, mode FROM pro_refresh_seen
+    WHERE sample_count = -1 AND processed_at <= ? ORDER BY processed_at LIMIT 1`)
+    .bind(now - 10 * 60).first<{ match_id: string; mode: 'normal' | 'turbo' }>();
+  if (!candidate) {
+    console.log(JSON.stringify({ message: 'pro-build discovery completed', discovered }));
+    return;
+  }
+  const { match_id: matchId, mode } = candidate;
   const match = await fetchProMatch(matchId, env);
+  if (!match || Number(match.durationSeconds || 0) <= 0) {
+    await env.DB.prepare('UPDATE pro_refresh_seen SET processed_at = ? WHERE match_id = ?').bind(now, matchId).run();
+    console.log(JSON.stringify({ message: 'pro-build match is still pending', matchId, mode, discovered }));
+    return;
+  }
   const statements = [];
   let sampleCount = 0;
 
@@ -727,7 +738,7 @@ async function processProBuildRefresh(env: Env): Promise<void> {
         player_name = excluded.player_name, leaderboard_rank = excluded.leaderboard_rank, observed_at = excluded.observed_at`)
         .bind(matchId, Number(player.playerSlot || 0), mode, Number(player.heroId), position,
           JSON.stringify(startingIds), JSON.stringify(coreIds), playerName, leaderboardRank || null,
-          Number(match.startDateTime || candidate.start_time || now)));
+          Number(match.startDateTime || now)));
       sampleCount += 1;
     }
   }
@@ -737,7 +748,7 @@ async function processProBuildRefresh(env: Env): Promise<void> {
   await env.DB.batch(statements);
   await env.DB.prepare('DELETE FROM pro_build_samples WHERE observed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
   await env.DB.prepare('DELETE FROM pro_refresh_seen WHERE processed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
-  console.log(JSON.stringify({ message: 'pro-build refresh completed', matchId, mode, samples: sampleCount }));
+  console.log(JSON.stringify({ message: 'pro-build refresh completed', matchId, mode, samples: sampleCount, discovered }));
 }
 
 async function ensureNoActiveVerification(attemptId: string, env: Env): Promise<void> {
