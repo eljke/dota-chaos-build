@@ -51,7 +51,6 @@ const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
 const RULES_VERSION = '2.0.0';
 const PRO_SAMPLE_MAX_AGE = 30 * 24 * 60 * 60;
-const PRO_REFRESH_INTERVAL = 12 * 60 * 60;
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -73,17 +72,15 @@ const STRATZ_MATCH_QUERY = `
   }
 `;
 
-const STRATZ_PRO_MATCHES_QUERY = `
-  query ProBuildMatches($id: Long!, $request: PlayerMatchesRequestType!) {
-    player(steamAccountId: $id) {
-      matches(request: $request) {
-        id startDateTime gameMode lobbyType leagueId
-        players {
-          steamAccountId playerSlot heroId position isVictory leaverStatus
-          item0Id item1Id item2Id item3Id item4Id item5Id
-          steamAccount { name seasonRank seasonLeaderboardRank proSteamAccount { name } }
-          stats { itemPurchases { itemId time } }
-        }
+const STRATZ_PRO_MATCH_QUERY = `
+  query ProBuildMatch($id: Long!) {
+    match(id: $id) {
+      id startDateTime gameMode lobbyType leagueId
+      players {
+        steamAccountId playerSlot heroId position isVictory leaverStatus
+        item0Id item1Id item2Id item3Id item4Id item5Id
+        steamAccount { name seasonRank seasonLeaderboardRank proSteamAccount { name } }
+        stats { itemPurchases { itemId time } }
       }
     }
   }
@@ -645,59 +642,70 @@ function stratzEnumNumber(value: unknown, values: Record<string, number>): numbe
   return typeof value === 'string' && value in values ? values[value] : Number(value || 0);
 }
 
-async function fetchProMatches(accountId: number, mode: 'normal' | 'turbo', env: Env): Promise<JsonObject[]> {
+async function fetchProMatch(matchId: string, env: Env): Promise<JsonObject | null> {
   const token = String((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN || '').trim();
-  if (!token) return [];
-  const startDateTime = nowSeconds() - PRO_SAMPLE_MAX_AGE;
-  const request = mode === 'turbo'
-    ? { take: 6, skip: 0, isParsed: true, startDateTime, gameModeIds: [23], playerList: 'ALL' }
-    : { take: 6, skip: 0, isParsed: true, startDateTime, gameModeIds: [1, 22], lobbyTypeIds: [7], playerList: 'ALL' };
+  if (!token) return null;
   const response = await fetch(STRATZ_API, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json',
       'User-Agent': STRATZ_USER_AGENT },
-    body: JSON.stringify({ query: STRATZ_PRO_MATCHES_QUERY, variables: { id: accountId, request } })
+    body: JSON.stringify({ query: STRATZ_PRO_MATCH_QUERY, variables: { id: Number(matchId) } })
   });
   if (!response.ok) throw new Error(`STRATZ pro-build refresh returned ${response.status}`);
   const payload: unknown = await response.json();
-  if (!isRecord(payload) || !isRecord(payload.data) || !isRecord(payload.data.player)) return [];
-  return Array.isArray(payload.data.player.matches) ? payload.data.player.matches.filter(isRecord) : [];
+  return isRecord(payload) && isRecord(payload.data) && isRecord(payload.data.match) ? payload.data.match : null;
+}
+
+async function nextPublicMatch(mode: 'normal' | 'turbo', env: Env): Promise<JsonObject | null> {
+  const response = await fetch('https://api.opendota.com/api/publicMatches', {
+    headers: { Accept: 'application/json', 'User-Agent': STRATZ_USER_AGENT }
+  });
+  if (!response.ok) throw new Error(`OpenDota public-match refresh returned ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) return null;
+  const candidates = payload.filter(isRecord).filter(match => {
+    const gameMode = Number(match.game_mode || 0);
+    const lobbyType = Number(match.lobby_type || 0);
+    const highRank = Number(match.avg_rank_tier || 0) >= 75;
+    return highRank && (mode === 'turbo' ? gameMode === 23 : gameMode === 22 && lobbyType === 7);
+  }).slice(0, 20);
+  if (!candidates.length) return null;
+  const ids = candidates.map(match => String(match.match_id));
+  const placeholders = ids.map(() => '?').join(',');
+  const { results } = await env.DB.prepare(`SELECT match_id FROM pro_refresh_seen WHERE match_id IN (${placeholders})`)
+    .bind(...ids).all<{ match_id: string }>();
+  const seen = new Set(results.map(row => row.match_id));
+  return candidates.find(match => !seen.has(String(match.match_id))) || null;
 }
 
 async function processProBuildRefresh(env: Env): Promise<void> {
   const now = nowSeconds();
-  const account = await env.DB.prepare(`SELECT account_id, next_normal_at, next_turbo_at FROM pro_accounts
-    WHERE MIN(next_normal_at, next_turbo_at) <= ? AND last_seen >= ?
-    ORDER BY MIN(next_normal_at, next_turbo_at), last_seen DESC LIMIT 1`)
-    .bind(now, now - 90 * 24 * 60 * 60).first<{ account_id: number; next_normal_at: number; next_turbo_at: number }>();
-  if (!account) return;
-  const mode: 'normal' | 'turbo' = account.next_normal_at <= account.next_turbo_at ? 'normal' : 'turbo';
-  const matches = await fetchProMatches(account.account_id, mode, env);
-  const statements = [env.DB.prepare(`UPDATE pro_accounts SET next_${mode}_at = ? WHERE account_id = ?`)
-    .bind(now + PRO_REFRESH_INTERVAL, account.account_id)];
+  const freshness = await env.DB.prepare(`SELECT
+    COALESCE(MAX(CASE WHEN mode = 'normal' THEN observed_at END), 0) AS normal_at,
+    COALESCE(MAX(CASE WHEN mode = 'turbo' THEN observed_at END), 0) AS turbo_at FROM pro_build_samples`)
+    .first<{ normal_at: number; turbo_at: number }>();
+  const mode: 'normal' | 'turbo' = Number(freshness?.normal_at || 0) <= Number(freshness?.turbo_at || 0)
+    ? 'normal' : 'turbo';
+  const candidate = await nextPublicMatch(mode, env);
+  if (!candidate) return;
+  const matchId = String(candidate.match_id);
+  const match = await fetchProMatch(matchId, env);
+  const statements = [];
+  let sampleCount = 0;
 
-  for (const match of matches) {
-    if (match.leagueId) continue;
+  if (match && !match.leagueId) {
     const gameMode = stratzEnumNumber(match.gameMode, { ALL_PICK: 1, ALL_PICK_RANKED: 22, TURBO: 23 });
-    if ((mode === 'turbo') !== (gameMode === 23)) continue;
     const players = Array.isArray(match.players) ? match.players.filter(isRecord) : [];
-    for (const player of players) {
+    if ((mode === 'turbo') === (gameMode === 23)) for (const player of players) {
       const steam = isRecord(player.steamAccount) ? player.steamAccount : {};
       const rank = Number(steam.seasonRank || 0);
       const leaderboardRank = Number(steam.seasonLeaderboardRank || 0);
       const pro = isRecord(steam.proSteamAccount) ? steam.proSteamAccount : null;
-      const highMmr = rank >= 80 && (leaderboardRank > 0 && leaderboardRank <= 2000 || Boolean(pro));
+      const highMmr = rank >= 80 && (mode === 'turbo' || leaderboardRank > 0 && leaderboardRank <= 2000 || Boolean(pro));
       const purchases = isRecord(player.stats) && Array.isArray(player.stats.itemPurchases)
         ? player.stats.itemPurchases.filter(isRecord) : [];
-      const accountId = Number(player.steamAccountId || 0);
-      if (!highMmr || accountId <= 0) continue;
-      const playerName = String(pro?.name || steam.name || `Immortal #${leaderboardRank || '?'}`).slice(0, 80);
-      statements.push(env.DB.prepare(`INSERT INTO pro_accounts
-        (account_id, player_name, leaderboard_rank, last_seen, next_normal_at, next_turbo_at)
-        VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(account_id) DO UPDATE SET player_name = excluded.player_name,
-        leaderboard_rank = excluded.leaderboard_rank, last_seen = MAX(pro_accounts.last_seen, excluded.last_seen)`)
-        .bind(accountId, playerName, leaderboardRank || null, Number(match.startDateTime || now), now + PRO_REFRESH_INTERVAL));
-      if (player.isVictory !== true || String(player.leaverStatus || 'NONE') !== 'NONE') continue;
+      if (!highMmr || Number(player.steamAccountId || 0) <= 0
+        || player.isVictory !== true || String(player.leaverStatus || 'NONE') !== 'NONE') continue;
       const finalIds = [player.item0Id, player.item1Id, player.item2Id, player.item3Id, player.item4Id, player.item5Id]
         .map(Number).filter(id => id > 0 && id !== 108 && id !== 609);
       const firstPurchase = new Map<number, number>();
@@ -711,21 +719,25 @@ async function processProBuildRefresh(env: Env): Promise<void> {
       const startingIds = purchases.filter(event => Number(event.time || 0) <= 0)
         .map(event => Number(event.itemId || 0)).filter(id => id > 0).slice(0, 8);
       const position = /^POSITION_[1-5]$/.test(String(player.position)) ? String(player.position) : 'UNKNOWN';
+      const playerName = String(pro?.name || steam.name || `Immortal #${leaderboardRank || '?'}`).slice(0, 80);
       statements.push(env.DB.prepare(`INSERT INTO pro_build_samples
         (match_id, player_slot, mode, hero_id, position, starting_item_ids, core_item_ids, player_name, leaderboard_rank, observed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id, player_slot) DO UPDATE SET
         starting_item_ids = excluded.starting_item_ids, core_item_ids = excluded.core_item_ids,
         player_name = excluded.player_name, leaderboard_rank = excluded.leaderboard_rank, observed_at = excluded.observed_at`)
-        .bind(String(match.id), Number(player.playerSlot || 0), mode, Number(player.heroId), position,
-          JSON.stringify(startingIds), JSON.stringify(coreIds), playerName, leaderboardRank || null, Number(match.startDateTime || now)));
-      if (statements.length >= 95) break;
+        .bind(matchId, Number(player.playerSlot || 0), mode, Number(player.heroId), position,
+          JSON.stringify(startingIds), JSON.stringify(coreIds), playerName, leaderboardRank || null,
+          Number(match.startDateTime || candidate.start_time || now)));
+      sampleCount += 1;
     }
-    if (statements.length >= 95) break;
   }
+  statements.push(env.DB.prepare(`INSERT INTO pro_refresh_seen (match_id, mode, processed_at, sample_count)
+    VALUES (?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET processed_at = excluded.processed_at,
+    sample_count = excluded.sample_count`).bind(matchId, mode, now, sampleCount));
   await env.DB.batch(statements);
   await env.DB.prepare('DELETE FROM pro_build_samples WHERE observed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
-  console.log(JSON.stringify({ message: 'pro-build refresh completed', accountId: account.account_id, mode,
-    matches: matches.length, writes: statements.length }));
+  await env.DB.prepare('DELETE FROM pro_refresh_seen WHERE processed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
+  console.log(JSON.stringify({ message: 'pro-build refresh completed', matchId, mode, samples: sampleCount }));
 }
 
 async function ensureNoActiveVerification(attemptId: string, env: Env): Promise<void> {
