@@ -670,7 +670,7 @@ async function discoverLiveMatches(env: Env): Promise<number> {
   const candidates = payload.game_list.filter(isRecord).filter(match => {
     const gameMode = Number(match.game_mode || 0);
     const lobbyType = Number(match.lobby_type || 0);
-    const highMmr = Number(match.average_mmr || 0) >= 7000;
+    const highMmr = gameMode === 23 || Number(match.average_mmr || 0) >= 7000;
     const publicGame = Number(match.league_id || 0) === 0;
     return highMmr && publicGame && (gameMode === 23 || gameMode === 22 && lobbyType === 7);
   });
