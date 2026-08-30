@@ -684,22 +684,14 @@ async function discoverLiveMatches(env: Env): Promise<number> {
   return statements.length;
 }
 
-async function processProBuildRefresh(env: Env): Promise<void> {
-  const now = nowSeconds();
-  const discovered = await discoverLiveMatches(env);
-  const candidate = await env.DB.prepare(`SELECT match_id, mode FROM pro_refresh_seen
-    WHERE sample_count = -1 AND processed_at <= ? ORDER BY processed_at LIMIT 1`)
-    .bind(now - 10 * 60).first<{ match_id: string; mode: 'normal' | 'turbo' }>();
-  if (!candidate) {
-    console.log(JSON.stringify({ message: 'pro-build discovery completed', discovered }));
-    return;
-  }
+async function processProBuildCandidate(
+  candidate: { match_id: string; mode: 'normal' | 'turbo' }, env: Env, now: number
+): Promise<number> {
   const { match_id: matchId, mode } = candidate;
   const match = await fetchProMatch(matchId, env);
   if (!match || Number(match.durationSeconds || 0) <= 0) {
     await env.DB.prepare('UPDATE pro_refresh_seen SET processed_at = ? WHERE match_id = ?').bind(now, matchId).run();
-    console.log(JSON.stringify({ message: 'pro-build match is still pending', matchId, mode, discovered }));
-    return;
+    return 0;
   }
   const statements = [];
   let sampleCount = 0;
@@ -757,9 +749,20 @@ async function processProBuildRefresh(env: Env): Promise<void> {
     VALUES (?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET processed_at = excluded.processed_at,
     sample_count = excluded.sample_count`).bind(matchId, mode, now, sampleCount));
   await env.DB.batch(statements);
+  return sampleCount;
+}
+
+async function processProBuildRefresh(env: Env): Promise<void> {
+  const now = nowSeconds();
+  const discovered = await discoverLiveMatches(env);
+  const { results: candidates } = await env.DB.prepare(`SELECT match_id, mode FROM pro_refresh_seen
+    WHERE sample_count = -1 AND processed_at <= ? ORDER BY processed_at LIMIT 3`)
+    .bind(now - 10 * 60).all<{ match_id: string; mode: 'normal' | 'turbo' }>();
+  let samples = 0;
+  for (const candidate of candidates) samples += await processProBuildCandidate(candidate, env, now);
   await env.DB.prepare('DELETE FROM pro_build_samples WHERE observed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
   await env.DB.prepare('DELETE FROM pro_refresh_seen WHERE processed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
-  console.log(JSON.stringify({ message: 'pro-build refresh completed', matchId, mode, samples: sampleCount, discovered }));
+  console.log(JSON.stringify({ message: 'pro-build refresh completed', processed: candidates.length, samples, discovered }));
 }
 
 async function ensureNoActiveVerification(attemptId: string, env: Env): Promise<void> {
