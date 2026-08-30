@@ -648,9 +648,10 @@ function stratzEnumNumber(value: unknown, values: Record<string, number>): numbe
 async function fetchProMatches(accountId: number, mode: 'normal' | 'turbo', env: Env): Promise<JsonObject[]> {
   const token = String((env as Env & { STRATZ_API_TOKEN?: string }).STRATZ_API_TOKEN || '').trim();
   if (!token) return [];
+  const startDateTime = nowSeconds() - PRO_SAMPLE_MAX_AGE;
   const request = mode === 'turbo'
-    ? { take: 6, skip: 0, isParsed: true, gameModeIds: [23], playerList: 'ALL' }
-    : { take: 6, skip: 0, isParsed: true, gameModeIds: [1, 22], lobbyTypeIds: [7], playerList: 'ALL' };
+    ? { take: 6, skip: 0, isParsed: true, startDateTime, gameModeIds: [23], playerList: 'ALL' }
+    : { take: 6, skip: 0, isParsed: true, startDateTime, gameModeIds: [1, 22], lobbyTypeIds: [7], playerList: 'ALL' };
   const response = await fetch(STRATZ_API, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json',
@@ -666,8 +667,9 @@ async function fetchProMatches(accountId: number, mode: 'normal' | 'turbo', env:
 async function processProBuildRefresh(env: Env): Promise<void> {
   const now = nowSeconds();
   const account = await env.DB.prepare(`SELECT account_id, next_normal_at, next_turbo_at FROM pro_accounts
-    WHERE MIN(next_normal_at, next_turbo_at) <= ? ORDER BY MIN(next_normal_at, next_turbo_at), last_seen DESC LIMIT 1`)
-    .bind(now).first<{ account_id: number; next_normal_at: number; next_turbo_at: number }>();
+    WHERE MIN(next_normal_at, next_turbo_at) <= ? AND last_seen >= ?
+    ORDER BY MIN(next_normal_at, next_turbo_at), last_seen DESC LIMIT 1`)
+    .bind(now, now - 90 * 24 * 60 * 60).first<{ account_id: number; next_normal_at: number; next_turbo_at: number }>();
   if (!account) return;
   const mode: 'normal' | 'turbo' = account.next_normal_at <= account.next_turbo_at ? 'normal' : 'turbo';
   const matches = await fetchProMatches(account.account_id, mode, env);
