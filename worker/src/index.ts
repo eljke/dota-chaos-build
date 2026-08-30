@@ -50,7 +50,7 @@ const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '2.0.0';
+const RULES_VERSION = '2.0.1';
 const PRO_SAMPLE_MAX_AGE = 30 * 24 * 60 * 60;
 
 const STRATZ_MATCH_QUERY = `
@@ -79,7 +79,7 @@ const STRATZ_PRO_MATCH_QUERY = `
       id startDateTime durationSeconds gameMode lobbyType leagueId
       players {
         steamAccountId playerSlot heroId position isVictory leaverStatus
-        item0Id item1Id item2Id item3Id item4Id item5Id
+        item0Id item1Id item2Id item3Id item4Id item5Id backpack0Id backpack1Id backpack2Id
         steamAccount { name seasonRank seasonLeaderboardRank proSteamAccount { name } }
         stats { itemPurchases { itemId time } }
       }
@@ -288,7 +288,7 @@ async function createProRoll(pool: RankedPool, mode: 'normal' | 'turbo', env: En
   const catalog = await getItemCatalog(env);
   const items = resolveItems(sample.core_item_ids, catalog);
   const startingItems = resolveItems(sample.starting_item_ids, catalog);
-  if (items.length < 4) throw new HttpError(503, 'Сборка STRATZ оказалась неполной.', 'pro_pool_incomplete');
+  if (items.length !== 6) throw new HttpError(503, 'Сборка STRATZ оказалась неполной.', 'pro_pool_incomplete');
   const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM pro_build_samples
     WHERE mode = ? AND hero_id = ? AND position = ? AND observed_at >= ?`)
     .bind(mode, sample.hero_id, sample.position, cutoff).first<{ count: number }>();
@@ -494,7 +494,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/2.0.0',
+      'User-Agent': 'dota-chaos-ranked-worker/2.0.1',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -704,7 +704,9 @@ async function processProBuildRefresh(env: Env): Promise<void> {
   const statements = [];
   let sampleCount = 0;
 
-  if (match && !match.leagueId) {
+  const minimumDuration = mode === 'turbo' ? 12 * 60 : 20 * 60;
+  if (match && !match.leagueId && Number(match.durationSeconds || 0) >= minimumDuration) {
+    const catalog = await getItemCatalog(env);
     const gameMode = stratzEnumNumber(match.gameMode, { ALL_PICK: 1, ALL_PICK_RANKED: 22, TURBO: 23 });
     const players = Array.isArray(match.players) ? match.players.filter(isRecord) : [];
     if ((mode === 'turbo') === (gameMode === 23)) for (const player of players) {
@@ -717,16 +719,25 @@ async function processProBuildRefresh(env: Env): Promise<void> {
         ? player.stats.itemPurchases.filter(isRecord) : [];
       if (!highMmr || Number(player.steamAccountId || 0) <= 0
         || player.isVictory !== true || String(player.leaverStatus || 'NONE') !== 'NONE') continue;
-      const finalIds = [player.item0Id, player.item1Id, player.item2Id, player.item3Id, player.item4Id, player.item5Id]
+      const finalIds = [player.item0Id, player.item1Id, player.item2Id, player.item3Id, player.item4Id, player.item5Id,
+        player.backpack0Id, player.backpack1Id, player.backpack2Id]
         .map(Number).filter(id => id > 0 && id !== 108 && id !== 609);
-      const firstPurchase = new Map<number, number>();
+      const purchaseTimes = new Map<number, number[]>();
       for (const event of purchases) {
         const id = Number(event.itemId || 0);
-        if (id > 0 && !firstPurchase.has(id)) firstPurchase.set(id, Number(event.time || 0));
+        if (id > 0) purchaseTimes.set(id, [...(purchaseTimes.get(id) || []), Number(event.time || 0)]);
       }
-      const coreIds = [...new Set(finalIds)].sort((left, right) =>
-        (firstPurchase.get(left) ?? Number.MAX_SAFE_INTEGER) - (firstPurchase.get(right) ?? Number.MAX_SAFE_INTEGER));
-      if (coreIds.length < 4) continue;
+      const occurrences = new Map<number, number>();
+      const coreIds = finalIds.map((id, slot) => {
+        const occurrence = occurrences.get(id) || 0;
+        occurrences.set(id, occurrence + 1);
+        return { id, slot, time: purchaseTimes.get(id)?.[occurrence] ?? Number.MAX_SAFE_INTEGER };
+      }).sort((left, right) => left.time - right.time || left.slot - right.slot).slice(0, 6).map(entry => entry.id);
+      const coreItems = coreIds.map(id => catalog.get(id));
+      if (coreIds.length !== 6 || coreItems.some(item => !item)) continue;
+      const totalCost = coreItems.reduce((sum, item) => sum + item!.cost, 0);
+      const majorItems = coreItems.filter(item => item!.cost >= 2000).length;
+      if (totalCost < (mode === 'turbo' ? 10000 : 12000) || majorItems < 2) continue;
       const startingIds = purchases.filter(event => Number(event.time || 0) <= 0)
         .map(event => Number(event.itemId || 0)).filter(id => id > 0).slice(0, 8);
       const position = /^POSITION_[1-5]$/.test(String(player.position)) ? String(player.position) : 'UNKNOWN';
