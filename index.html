@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=1.9.1">
+  <link rel="stylesheet" href="styles.css?v=2.0.0">
   <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -228,6 +228,10 @@
 
         <section class="ranked-setup dota-panel" id="rankedSetup">
           <div class="ranked-section-title"><span>01</span><div><small data-i18n="ranked.setupKicker">НОВАЯ ПОПЫТКА</small><h2 data-i18n="ranked.setupTitle">Как играем?</h2></div></div>
+          <div class="ranked-style-picker" role="radiogroup" aria-label="Тип сборки" data-i18n-aria-label="ranked.styleLabel">
+            <label class="ranked-style-card"><input type="radio" name="rankedStyle" value="chaos" checked><span><b data-i18n="ranked.styleChaos">Хаос</b><small data-i18n="ranked.styleChaosHint">Случайный герой и случайные предметы</small></span></label>
+            <label class="ranked-style-card ranked-style-card--pro"><input type="radio" name="rankedStyle" value="pro"><span><b data-i18n="ranked.stylePro">Проверенная сборка</b><small data-i18n="ranked.styleProHint">Победная сборка из high-MMR паблика STRATZ</small></span></label>
+          </div>
           <div class="ranked-settings">
             <label><span data-i18n="ranked.mode">РЕЖИМ</span><select id="rankedMode"><option value="normal" data-i18n="ranked.normal">Обычная игра</option><option value="turbo" data-i18n="ranked.turbo">Turbo</option></select></label>
             <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span><span data-i18n="ranked.order">Собрать предметы по порядку</span> <b data-i18n="ranked.orderBonus">+20% к очкам</b></span></label>
@@ -252,6 +256,10 @@
           <section class="ranked-build" aria-labelledby="rankedBuildTitle">
             <div class="ranked-section-title"><span>02</span><div><small data-i18n="ranked.buildKicker">ВАША СБОРКА</small><h2 id="rankedBuildTitle" data-i18n="ranked.buildTitle">Шесть предметов на эту игру</h2></div></div>
             <div class="ranked-items" id="rankedItems" aria-label="Предметы ranked-сборки" data-i18n-aria-label="ranked.itemsLabel"></div>
+            <div class="ranked-pro-details" id="rankedProDetails" hidden>
+              <div><small data-i18n="ranked.startingBuy">СТАРТОВЫЙ ЗАКУП</small><div class="ranked-starting-items" id="rankedStartingItems"></div></div>
+              <div class="ranked-source"><small data-i18n="ranked.source">ИСТОЧНИК СБОРКИ</small><strong id="rankedSourcePlayer">—</strong><a id="rankedSourceMatch" target="_blank" rel="noreferrer">STRATZ</a><span id="rankedSourceSample"></span></div>
+            </div>
             <div class="ranked-upgrades">
               <span><b>+</b><span data-i18n="ranked.optionalScepter">Aghanim's Scepter · по желанию</span></span><span><b>+</b><span data-i18n="ranked.optionalShard">Aghanim's Shard · по желанию</span></span>
             </div>
@@ -295,6 +303,10 @@
             <button type="button" data-ranked-board-mode="turbo" aria-pressed="false">Turbo</button>
           </div>
         </div>
+        <div class="ranked-style-switch" role="group" aria-label="Тип лидерборда" data-i18n-aria-label="ranked.boardStyle">
+          <button class="is-active" type="button" data-ranked-board-style="chaos" aria-pressed="true" data-i18n="ranked.styleChaos">Хаос</button>
+          <button type="button" data-ranked-board-style="pro" aria-pressed="false" data-i18n="ranked.stylePro">Проверенная сборка</button>
+        </div>
         <p data-i18n="ranked.boardHint">Режимы считаются отдельно. При равных очках выше игрок с меньшим числом штрафов.</p>
         <ol id="rankedLeaderboard"><li class="ranked-empty" data-i18n="ranked.boardLoading">Загружаем результаты…</li></ol>
       </aside>
@@ -311,6 +323,10 @@
       <div class="ranked-board-switch stats-mode-switch" role="group" aria-label="Режим статистики" data-i18n-aria-label="stats.mode">
         <button class="is-active" type="button" data-stats-mode="normal" aria-pressed="true">Normal</button>
         <button type="button" data-stats-mode="turbo" aria-pressed="false">Turbo</button>
+      </div>
+      <div class="ranked-style-switch stats-style-switch" role="group" aria-label="Тип статистики" data-i18n-aria-label="ranked.boardStyle">
+        <button class="is-active" type="button" data-stats-style="chaos" aria-pressed="true" data-i18n="ranked.styleChaos">Хаос</button>
+        <button type="button" data-stats-style="pro" aria-pressed="false" data-i18n="ranked.stylePro">Проверенная сборка</button>
       </div>
     </header>
     <p class="stats-status" id="statsStatus" aria-live="polite"></p>
@@ -372,6 +388,14 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>2.0.0</h3><time datetime="2026-08-30" data-i18n="release.2.0.0.date">30 августа 2026</time></header>
+        <ul>
+          <li data-i18n="release.2.0.0.a">Добавили проверенные сборки из победных high-MMR пабликов STRATZ.</li>
+          <li data-i18n="release.2.0.0.b">Normal и Turbo получили отдельные выборки и лидерборды.</li>
+          <li data-i18n="release.2.0.0.c">В сборке видны позиция, стартовый закуп, порядок предметов и исходный матч.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>1.9.1</h3><time datetime="2026-08-25" data-i18n="release.1.9.1.date">25 августа 2026</time></header>
         <ul>
@@ -525,6 +549,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=1.9.1"></script>
+  <script type="module" src="app.js?v=2.0.0"></script>
 </body>
 </html>

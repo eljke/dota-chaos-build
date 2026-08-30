@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=1.9.1';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=1.9.1';
+import { getLocale, modifierText, t } from './i18n.js?v=2.0.0';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=2.0.0';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
@@ -36,15 +36,19 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     randomTab: el('#randomViewTab'), rankedTab: el('#rankedViewTab'), statsTab: el('#statsViewTab'),
     auth: el('#rankedAuth'), name: el('#rankedName'), avatar: el('#rankedAvatar'), avatarFallback: el('#rankedAvatarFallback'),
     login: el('#rankedLoginButton'), logout: el('#rankedLogoutButton'),
-    mode: el('#rankedMode'), order: el('#rankedOrder'), start: el('#rankedStartButton'), setup: el('#rankedSetup'),
+    mode: el('#rankedMode'), order: el('#rankedOrder'), styles: [...document.querySelectorAll('input[name="rankedStyle"]')],
+    start: el('#rankedStartButton'), setup: el('#rankedSetup'),
     attempt: el('#rankedAttempt'), heroImage: el('#rankedHeroImage'), heroName: el('#rankedHeroName'), heroMode: el('#rankedHeroMode'),
     items: el('#rankedItems'), modifierName: el('#rankedModifierName'), modifierDescription: el('#rankedModifierDescription'),
+    proDetails: el('#rankedProDetails'), startingItems: el('#rankedStartingItems'), sourcePlayer: el('#rankedSourcePlayer'),
+    sourceMatch: el('#rankedSourceMatch'), sourceSample: el('#rankedSourceSample'),
     rerolls: el('#rankedRerolls'), cancelPenalties: el('#rankedCancelPenalties'), score: el('#rankedScore'),
     eligibility: el('#rankedEligibility'), eligibilityTime: el('#rankedEligibilityTime'),
     reroll: el('#rankedRerollButton'), cancel: el('#rankedCancelButton'),
     match: el('#rankedMatchId'), submit: el('#rankedSubmitButton'), defer: el('#rankedDeferButton'), status: el('#rankedStatus'),
     queue: el('#rankedVerificationQueue'), queueList: el('#rankedVerificationQueueList'),
     board: el('#rankedLeaderboard'), boardModes: [...document.querySelectorAll('[data-ranked-board-mode]')],
+    boardStyles: [...document.querySelectorAll('[data-ranked-board-style]')],
     cancelDialog: el('#rankedCancelDialog'), cancelPenaltyText: el('#rankedCancelPenaltyText'),
     cancelClose: el('#rankedCancelClose'), cancelKeep: el('#rankedCancelKeep'), cancelConfirm: el('#rankedCancelConfirm')
   };
@@ -59,6 +63,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   let verificationPollTimer = null;
   let countdownTimer = null;
   let leaderboardMode = 'normal';
+  let leaderboardStyle = 'chaos';
   let verificationQueue = [];
   let queuePollTimer = null;
 
@@ -193,6 +198,19 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       </article>`).join('');
   }
 
+  function renderProDetails() {
+    const isPro = attempt?.buildStyle === 'pro';
+    ui.proDetails.hidden = !isPro;
+    if (!isPro) return;
+    ui.startingItems.innerHTML = (attempt.startingItems || []).map(item => `
+      <span title="${escapeHtml(item.name)}"><img src="${itemImage(item)}" alt="${escapeHtml(item.name)}" loading="lazy"></span>`).join('')
+      || `<small>${t('ranked.startingFlexible')}</small>`;
+    ui.sourcePlayer.textContent = `${attempt.source?.player || t('ranked.highMmrPlayer')} · ${t(`ranked.${String(attempt.position || 'UNKNOWN').toLowerCase()}`)}`;
+    ui.sourceMatch.href = `https://stratz.com/matches/${encodeURIComponent(attempt.source?.matchId || '')}`;
+    ui.sourceMatch.textContent = t('ranked.openMatch');
+    ui.sourceSample.textContent = t('ranked.sample', { count: attempt.source?.sampleCount || 1 });
+  }
+
   function renderEligibility() {
     if (!attempt) return;
     const remaining = Number(attempt.eligibleAt || 0) - nowSeconds();
@@ -210,20 +228,23 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     if (!attempt) return;
 
     ui.mode.value = attempt.mode;
+    ui.styles.forEach(input => { input.checked = input.value === (attempt.buildStyle || 'chaos'); });
     ui.heroImage.src = heroImage(attempt.hero.key);
     ui.heroImage.alt = attempt.hero.name;
     ui.heroName.textContent = attempt.hero.name;
-    ui.heroMode.textContent = attempt.mode === 'turbo' ? 'TURBO' : 'NORMAL';
+    ui.heroMode.textContent = `${attempt.buildStyle === 'pro' ? t('ranked.stylePro') : t('ranked.styleChaos')} · ${attempt.mode === 'turbo' ? 'TURBO' : 'NORMAL'}`;
     ui.rerolls.textContent = String(attempt.rerolls || 0);
     ui.cancelPenalties.textContent = String(attempt.cancelPenalties || 0);
     ui.score.textContent = Number(attempt.scorePreview || 0).toLocaleString(getLocale());
     const modifier = modifierText(attempt.modifier);
     ui.modifierName.textContent = modifier.name;
-    const order = attempt.orderRequired ? t('ranked.scoreDetails') : '';
+    const order = attempt.orderRequired
+      ? t(attempt.buildStyle === 'pro' ? 'ranked.proOrderDetails' : 'ranked.scoreDetails') : '';
     const multiplier = attempt.modifier ? `×${Number(attempt.modifier.multiplier || 1).toFixed(2)}.` : '';
     ui.modifierDescription.textContent = [modifier.description, order, multiplier, t('ranked.partialDetails')].filter(Boolean).join(' ');
     ui.cancelPenaltyText.textContent = t('ranked.cancelDialogText');
     renderItems();
+    renderProDetails();
     renderEligibility();
   }
 
@@ -233,7 +254,10 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     ui.start.disabled = busy || !authenticated || Boolean(attempt) || cooldown > 0;
     ui.start.textContent = cooldown > 0 ? t('ranked.cooldown', { time: formatCountdown(cooldown) }) : t('ranked.start');
     ui.mode.disabled = busy || Boolean(attempt);
-    ui.order.disabled = busy || Boolean(attempt);
+    const selectedStyle = ui.styles.find(input => input.checked)?.value || 'chaos';
+    ui.order.closest('.ranked-order').hidden = selectedStyle === 'pro';
+    ui.order.disabled = busy || Boolean(attempt) || selectedStyle === 'pro';
+    ui.styles.forEach(input => { input.disabled = busy || Boolean(attempt); });
     const verificationActive = verificationIsActive();
     ui.reroll.disabled = busy || !attempt || verificationActive;
     ui.cancel.disabled = busy || !attempt || verificationActive;
@@ -255,6 +279,11 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     renderVerificationQueue();
     ui.boardModes.forEach(button => {
       const active = button.dataset.rankedBoardMode === leaderboardMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    ui.boardStyles.forEach(button => {
+      const active = button.dataset.rankedBoardStyle === leaderboardStyle;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
@@ -311,7 +340,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
   async function loadLeaderboard() {
     ui.board.innerHTML = `<li class="ranked-empty">${t('ranked.boardLoading')}</li>`;
     try {
-      const { entries } = await request(`/leaderboard?mode=${leaderboardMode}`);
+      const { entries } = await request(`/leaderboard?mode=${leaderboardMode}&style=${leaderboardStyle}`);
       ui.board.innerHTML = entries.length ? entries.map((entry, index) => {
         const avatar = /^https:\/\//i.test(entry.avatarUrl || '')
           ? `<img src="${escapeHtml(entry.avatarUrl)}" alt="" loading="lazy">`
@@ -375,13 +404,21 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     render();
     loadLeaderboard();
   }));
+  ui.boardStyles.forEach(button => button.addEventListener('click', () => {
+    leaderboardStyle = button.dataset.rankedBoardStyle;
+    render();
+    loadLeaderboard();
+  }));
+  ui.styles.forEach(input => input.addEventListener('change', render));
   ui.start.addEventListener('click', () => action(async () => {
     const data = await request('/attempts', {
       method: 'POST',
-      body: JSON.stringify({ mode: ui.mode.value, orderRequired: ui.order.checked })
+      body: JSON.stringify({ mode: ui.mode.value, buildStyle: ui.styles.find(input => input.checked)?.value || 'chaos',
+        orderRequired: ui.order.checked })
     });
     attempt = data.attempt;
     leaderboardMode = attempt.mode;
+    leaderboardStyle = attempt.buildStyle || 'chaos';
     verificationJob = null;
     stopVerificationPolling();
     verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
@@ -471,7 +508,10 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       ({ user } = await request('/me'));
       if (!user) throw new Error('Session expired.');
       ({ attempt } = await request('/attempts/active'));
-      if (attempt) leaderboardMode = attempt.mode;
+      if (attempt) {
+        leaderboardMode = attempt.mode;
+        leaderboardStyle = attempt.buildStyle || 'chaos';
+      }
       verificationRetryUntil = Number(attempt?.verificationRetryAt || 0);
       if (attempt) {
         const verification = await request(`/attempts/${attempt.id}/verification`);

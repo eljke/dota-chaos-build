@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "dota-chaos-ranked-api",
   "main": "worker/src/index.ts",
-  "compatibility_date": "2026-08-06",
+  "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "triggers": { "crons": ["* * * * *"] },
