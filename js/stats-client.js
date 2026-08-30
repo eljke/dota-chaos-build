@@ -1,5 +1,5 @@
-import { modifierText, t } from './i18n.js?v=1.9.1';
-import { rankedRequest, sessionToken } from './ranked-api.js?v=1.9.1';
+import { modifierText, t } from './i18n.js?v=2.0.0';
+import { rankedRequest, sessionToken } from './ranked-api.js?v=2.0.0';
 
 const escapeHtml = value => {
   const node = document.createElement('span');
@@ -10,6 +10,7 @@ const escapeHtml = value => {
 export function initStats() {
   const ui = {
     modes: [...document.querySelectorAll('[data-stats-mode]')],
+    styles: [...document.querySelectorAll('[data-stats-style]')],
     status: document.querySelector('#statsStatus'),
     wins: document.querySelector('#statsWins'),
     players: document.querySelector('#statsPlayers'),
@@ -19,10 +20,16 @@ export function initStats() {
     recent: document.querySelector('#statsRecent')
   };
   let mode = 'normal';
+  let style = 'chaos';
 
   function renderModes() {
     ui.modes.forEach(button => {
       const active = button.dataset.statsMode === mode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    ui.styles.forEach(button => {
+      const active = button.dataset.statsStyle === style;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
@@ -59,7 +66,7 @@ export function initStats() {
     renderModes();
     ui.status.textContent = t('stats.loading');
     try {
-      const data = await rankedRequest(`/stats?mode=${mode}`);
+      const data = await rankedRequest(`/stats?mode=${mode}&style=${style}`);
       ui.wins.textContent = Number(data.summary?.verifiedWins || 0).toLocaleString();
       ui.players.textContent = Number(data.summary?.players || 0).toLocaleString();
       ui.average.textContent = Number(data.summary?.averageScore || 0).toLocaleString();
@@ -75,6 +82,10 @@ export function initStats() {
 
   ui.modes.forEach(button => button.addEventListener('click', () => {
     mode = button.dataset.statsMode;
+    load();
+  }));
+  ui.styles.forEach(button => button.addEventListener('click', () => {
+    style = button.dataset.statsStyle;
     load();
   }));
   window.addEventListener('dcb:viewchange', event => {
