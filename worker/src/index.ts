@@ -50,8 +50,17 @@ const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '2.0.1';
+const RULES_VERSION = '2.0.2';
 const PRO_SAMPLE_MAX_AGE = 30 * 24 * 60 * 60;
+const NON_BUILD_ITEM_IDS = new Set([108, 117, 609]);
+const STARTING_BUY_IDS: Record<string, number[]> = {
+  POSITION_1: [44, 16, 16, 11, 20, 237],
+  POSITION_2: [44, 16, 16, 20, 237, 216],
+  POSITION_3: [44, 16, 16, 11, 34, 38],
+  POSITION_4: [44, 16, 16, 34, 1123, 38],
+  POSITION_5: [44, 16, 16, 34, 1123, 216],
+  UNKNOWN: [44, 16, 16, 34, 237, 38]
+};
 
 const STRATZ_MATCH_QUERY = `
   query RankedMatch($id: Long!) {
@@ -243,7 +252,7 @@ function createRoll(pool: RankedPool, mode: 'normal' | 'turbo', orderRequired: b
     seed,
     forceBootSlot: true,
     heroes: pool.heroes,
-    itemPool: pool.items.filter(item => item.key !== 'rapier'),
+    itemPool: pool.items.filter(item => item.key !== 'rapier' && !NON_BUILD_ITEM_IDS.has(item.id)),
     itemsByKey,
     bootKeys: BOOT_KEYS,
     isCompatible: isItemCompatible,
@@ -275,20 +284,30 @@ function resolveItems(idsJson: string, catalog: Map<number, RankedItem>): Ranked
   return Array.isArray(ids) ? ids.map(Number).map(id => catalog.get(id)).filter((item): item is RankedItem => Boolean(item)) : [];
 }
 
+function fallbackStartingItems(position: string, catalog: Map<number, RankedItem>): RankedItem[] {
+  return (STARTING_BUY_IDS[position] || STARTING_BUY_IDS.UNKNOWN)
+    .map(id => catalog.get(id)).filter((item): item is RankedItem => Boolean(item));
+}
+
 async function createProRoll(pool: RankedPool, mode: 'normal' | 'turbo', env: Env) {
   const cutoff = nowSeconds() - PRO_SAMPLE_MAX_AGE;
-  const sample = await env.DB.prepare(`SELECT * FROM pro_build_samples
-    WHERE mode = ? AND observed_at >= ? ORDER BY RANDOM() LIMIT 1`)
-    .bind(mode, cutoff).first<ProBuildSampleRow>();
-  if (!sample) throw new HttpError(503, mode === 'turbo'
+  const { results: samples } = await env.DB.prepare(`SELECT * FROM pro_build_samples
+    WHERE mode = ? AND observed_at >= ? ORDER BY RANDOM() LIMIT 25`)
+    .bind(mode, cutoff).all<ProBuildSampleRow>();
+  if (!samples.length) throw new HttpError(503, mode === 'turbo'
     ? 'Свежая Turbo-выборка ещё собирается. Попробуйте немного позже.'
     : 'Свежая high-MMR выборка ещё собирается. Попробуйте немного позже.', 'pro_pool_warming_up');
-  const hero = pool.heroes.find(entry => entry.id === sample.hero_id);
-  if (!hero) throw new HttpError(503, 'Герой из STRATZ ещё не попал в текущий пул.', 'pro_pool_incomplete');
   const catalog = await getItemCatalog(env);
-  const items = resolveItems(sample.core_item_ids, catalog);
-  const startingItems = resolveItems(sample.starting_item_ids, catalog);
-  if (items.length !== 6) throw new HttpError(503, 'Сборка STRATZ оказалась неполной.', 'pro_pool_incomplete');
+  const selected = samples.map(sample => ({
+    sample,
+    hero: pool.heroes.find(entry => entry.id === sample.hero_id),
+    items: resolveItems(sample.core_item_ids, catalog)
+      .filter(item => !NON_BUILD_ITEM_IDS.has(item.id) && item.cost > 0)
+  })).find(candidate => candidate.hero && candidate.items.length === 6);
+  if (!selected?.hero) throw new HttpError(503, 'В свежей STRATZ-выборке пока нет полной покупаемой сборки.', 'pro_pool_incomplete');
+  const { sample, hero, items } = selected;
+  const sourceStartingItems = resolveItems(sample.starting_item_ids, catalog).filter(item => item.id !== 117);
+  const startingItems = sourceStartingItems.length ? sourceStartingItems : fallbackStartingItems(sample.position, catalog);
   const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM pro_build_samples
     WHERE mode = ? AND hero_id = ? AND position = ? AND observed_at >= ?`)
     .bind(mode, sample.hero_id, sample.position, cutoff).first<{ count: number }>();
@@ -302,6 +321,7 @@ async function createProRoll(pool: RankedPool, mode: 'normal' | 'turbo', env: En
 
 function challenge(row: AttemptRow) {
   const items: RankedItem[] = JSON.parse(row.items_json);
+  const startingItems: RankedItem[] = JSON.parse(row.starting_items_json || '[]');
   const modifier = modifierById(row.modifier_id);
   const cancelPenalties = Number(row.cancel_penalties || 0);
   const committedAt = Number(row.committed_at || row.updated_at);
@@ -319,12 +339,13 @@ function challenge(row: AttemptRow) {
     scorePreview: calculateScore({
       rerolls: row.roll_count,
       cancelPenalties,
-      orderRequired: row.order_required === 1 && row.build_style !== 'pro',
+      orderRequired: row.order_required === 1,
+      startingBuyCompleted: row.build_style === 'pro' && startingItems.length > 0,
       modifierMultiplier: modifier?.multiplier
     }),
     hero: { id: row.hero_id, key: row.hero_key, name: row.hero_name },
     items,
-    startingItems: JSON.parse(row.starting_items_json || '[]'),
+    startingItems,
     position: row.position,
     source: row.build_style === 'pro' ? {
       provider: 'STRATZ', matchId: row.source_match_id, player: row.source_player, sampleCount: row.sample_count
@@ -436,7 +457,7 @@ async function claimVerificationRequest(attemptId: string, steamId: string, env:
   const now = nowSeconds();
   const retryAt = now + VERIFICATION_REQUEST_COOLDOWN_SECONDS;
   const claimed = await env.DB.prepare(`UPDATE attempts SET verification_retry_at = ?
-    WHERE id = ? AND steam_id = ? AND status = 'committed' AND verification_retry_at <= ?`)
+    WHERE id = ? AND steam_id = ? AND status IN ('committed', 'expired') AND verification_retry_at <= ?`)
     .bind(retryAt, attemptId, steamId, now).run();
   if (claimed.meta.changes === 1) return;
 
@@ -479,7 +500,8 @@ function verificationAttempt(attempt: AttemptRow) {
     committed_at: attempt.committed_at,
     build_style: attempt.build_style,
     match_guard_seconds: MATCH_GUARD_SECONDS[attempt.mode],
-    items: JSON.parse(attempt.items_json)
+    items: JSON.parse(attempt.items_json),
+    starting_items: JSON.parse(attempt.starting_items_json || '[]')
   };
 }
 
@@ -494,7 +516,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/2.0.1',
+      'User-Agent': 'dota-chaos-ranked-worker/2.0.2',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -547,15 +569,19 @@ function parseJobResult(job: VerificationJobRow): JsonObject | null {
 }
 
 function verificationJobPayload(job: VerificationJobRow, attempt?: AttemptRow | null) {
+  const manualRetry = ['rejected', 'error', 'stale'].includes(job.status);
   const retryAfter = job.status === 'retry'
     ? Math.max(1, Number(attempt?.verification_retry_at || nowSeconds() + 15) - nowSeconds())
-    : ['queued', 'running'].includes(job.status) ? 5 : 0;
+    : ['queued', 'running'].includes(job.status) ? 5
+      : manualRetry ? Math.max(0, Number(attempt?.verification_retry_at || 0) - nowSeconds()) : 0;
   return {
     jobId: job.id,
+    attemptId: job.attempt_id,
     matchId: job.match_id,
     status: job.status,
     message: job.message,
     retryAfter,
+    canRetry: manualRetry && retryAfter === 0,
     result: parseJobResult(job),
     updatedAt: job.updated_at
   };
@@ -582,7 +608,8 @@ async function handleVerificationQueue(request: Request, env: Env): Promise<Resp
     .bind(user.steam_id, now - 24 * 60 * 60).all<VerificationJobRow>();
   const jobs = await Promise.all(results.map(async job => {
     const attempt = await getAttemptById(job.attempt_id, env);
-    return { ...verificationJobPayload(job, attempt), mode: attempt?.mode || 'normal', heroName: attempt?.hero_name || '' };
+    return { ...verificationJobPayload(job, attempt), mode: attempt?.mode || 'normal',
+      buildStyle: attempt?.build_style || 'chaos', heroName: attempt?.hero_name || '' };
   }));
   const { results: deferred } = await env.DB.prepare(`SELECT id, mode, hero_name, deferred_at FROM attempts
     WHERE steam_id = ? AND status = 'expired' AND deferred_at > ?
@@ -713,7 +740,7 @@ async function processProBuildCandidate(
         || player.isVictory !== true || String(player.leaverStatus || 'NONE') !== 'NONE') continue;
       const finalIds = [player.item0Id, player.item1Id, player.item2Id, player.item3Id, player.item4Id, player.item5Id,
         player.backpack0Id, player.backpack1Id, player.backpack2Id]
-        .map(Number).filter(id => id > 0 && id !== 108 && id !== 609);
+        .map(Number).filter(id => id > 0 && !NON_BUILD_ITEM_IDS.has(id) && Number(catalog.get(id)?.cost || 0) > 0);
       const purchaseTimes = new Map<number, number[]>();
       for (const event of purchases) {
         const id = Number(event.itemId || 0);
@@ -752,9 +779,9 @@ async function processProBuildCandidate(
   return sampleCount;
 }
 
-async function processProBuildRefresh(env: Env): Promise<void> {
+async function processProBuildRefresh(env: Env, discover: boolean): Promise<void> {
   const now = nowSeconds();
-  const discovered = await discoverLiveMatches(env);
+  const discovered = discover ? await discoverLiveMatches(env) : 0;
   const { results: candidates } = await env.DB.prepare(`SELECT match_id, mode FROM pro_refresh_seen
     WHERE sample_count = -1 AND processed_at <= ? ORDER BY processed_at LIMIT 3`)
     .bind(now - 10 * 60).all<{ match_id: string; mode: 'normal' | 'turbo' }>();
@@ -956,11 +983,14 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
   const completedItems = Number(proof.completedItems || 0);
   const totalItems = Number(proof.totalItems || 6);
   const completionValue = Number(proof.completionMultiplier || 0);
+  const orderCompleted = proof.orderCompleted !== false;
+  const startingBuyCompleted = proof.startingBuyCompleted === true;
   const modifierCompleted = proof.modifierCompleted === true;
   const score = calculateScore({
     rerolls: attempt.roll_count,
     cancelPenalties,
-    orderRequired: attempt.order_required === 1 && attempt.build_style !== 'pro',
+    orderRequired: attempt.order_required === 1 && orderCompleted,
+    startingBuyCompleted,
     modifierMultiplier: modifierCompleted ? modifier?.multiplier : 1,
     completedItems,
     totalItems
@@ -971,6 +1001,8 @@ async function handleVerificationCallback(request: Request, env: Env): Promise<R
     completedItems,
     totalItems,
     completionMultiplier: completionValue,
+    orderCompleted,
+    startingBuyCompleted,
     modifierCompleted,
     modifierId: modifier?.id || null,
     evidence: proof.evidence
@@ -1131,7 +1163,9 @@ async function handleDefer(id: string, request: Request, env: Env): Promise<Resp
 async function handleSubmit(id: string, request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const attempt = await getAttempt(id, user.steam_id, env);
-  if (!canSubmitAttempt(attempt) || !attempt.committed_at) {
+  const latest = await latestVerificationJob(attempt.id, env);
+  const canRetry = attempt.status === 'expired' && latest && ['rejected', 'error', 'stale'].includes(latest.status);
+  if ((!canSubmitAttempt(attempt) && !canRetry) || !attempt.committed_at) {
     throw new HttpError(409, 'Ranked-попытка не активна.', 'attempt_not_committed');
   }
   const body = await readJson(request);
@@ -1140,7 +1174,7 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
 
   const existing = await activeVerificationJob(attempt.id, env);
   if (existing) return json(verificationJobPayload(existing, attempt), 202, env);
-  if (attempt.status === 'committed') await claimVerificationRequest(attempt.id, user.steam_id, env);
+  await claimVerificationRequest(attempt.id, user.steam_id, env);
 
   const now = nowSeconds();
   const job: VerificationJobRow = {
@@ -1329,12 +1363,14 @@ export default {
       return json({ error: message, code: known ? error.code : 'internal_error', ...(known ? error.details : {}) }, known ? error.status : 500, env);
     }
   },
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     await processVerificationQueue(env);
-    try {
-      await processProBuildRefresh(env);
-    } catch (error) {
-      console.error(JSON.stringify({ message: 'pro-build refresh failed', error: error instanceof Error ? error.message : String(error) }));
+    if (controller.cron === '*/10 * * * *' || controller.cron === '17 3 * * *') {
+      try {
+        await processProBuildRefresh(env, controller.cron === '17 3 * * *');
+      } catch (error) {
+        console.error(JSON.stringify({ message: 'pro-build refresh failed', error: error instanceof Error ? error.message : String(error) }));
+      }
     }
   }
 } satisfies ExportedHandler<Env>;

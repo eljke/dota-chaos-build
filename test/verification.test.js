@@ -21,6 +21,7 @@ const match = { players: [player], lobby_type: 7, game_mode: 22, start_time: 101
 
 test('score accounts for order and every seen build', () => {
   assert.equal(calculateScore({ rerolls: 0, orderRequired: true }), 1200);
+  assert.equal(calculateScore({ rerolls: 0, orderRequired: true, startingBuyCompleted: true }), 1260);
   assert.equal(calculateScore({ rerolls: 1, orderRequired: true }), 600);
   assert.equal(calculateScore({ rerolls: 4, orderRequired: false }), 200);
   assert.equal(calculateScore({ rerolls: 0, cancelPenalties: 1, orderRequired: false }), 500);
@@ -36,14 +37,30 @@ test('valid match proves hero, victory, inventory and order', () => {
   assert.equal(verifyMatch({ match, attempt, accountId: 42 }).ok, true);
 });
 
-test('wrong purchase order fails strict order proof', () => {
+test('wrong purchase order keeps the win without its bonus', () => {
   const reversed = structuredClone(match);
   reversed.players[0].purchase_log[0] = { key: 'blink', time: 500 };
   reversed.players[0].purchase_log[1] = { key: 'phase_boots', time: 800 };
   const result = verifyMatch({ match: reversed, attempt, accountId: 42 });
-  assert.equal(result.ok, false);
-  assert.ok(result.errorCodes.includes('wrong_item_order'));
-  assert.ok(result.errors.some(error => error.includes('порядке')));
+  assert.equal(result.ok, true);
+  assert.equal(result.orderCompleted, false);
+});
+
+test('complete pregame buy earns its bonus', () => {
+  const startingItems = [
+    { id: 44, key: 'tango', sourceKey: 'tango', name: 'Tango' },
+    { id: 16, key: 'branches', sourceKey: 'branches', name: 'Iron Branch' },
+    { id: 16, key: 'branches', sourceKey: 'branches', name: 'Iron Branch' }
+  ];
+  const proAttempt = { ...attempt, starting_items: startingItems };
+  const proMatch = structuredClone(match);
+  proMatch.players[0].purchase_log.unshift(
+    { id: 44, time: -20 }, { id: 16, time: -19 }, { id: 16, time: -18 }
+  );
+
+  const result = verifyMatch({ match: proMatch, attempt: proAttempt, accountId: 42 });
+  assert.equal(result.startingBuyCompleted, true);
+  assert.equal(calculateScore({ rerolls: 0, orderRequired: false, startingBuyCompleted: true }), 1050);
 });
 
 test('unparsed match asks for replay parsing', () => {
