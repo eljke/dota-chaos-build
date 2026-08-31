@@ -3,6 +3,7 @@ import { modifierById } from '../../js/modifiers.js';
 const NORMAL_GAME_MODES = new Set([1, 2, 3, 4, 5, 12, 16, 17, 22]);
 const PUBLIC_LOBBIES = new Set([0, 5, 6, 7, 9]);
 const MISSING_ITEM_FACTOR = 0.6;
+const AEGIS_ITEM_ID = 117;
 
 function numericSet(values) {
   return new Set((Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite));
@@ -203,7 +204,9 @@ export function verifyMatch({ match, attempt, accountId }) {
   if (Number(player.leaver_status) !== 0) fail('abandon', 'Матч содержит abandon или ранний выход.');
 
   const committedAt = Number(attempt.committed_at);
-  const matchStartTime = Number(match.start_time);
+  const serverStartTime = Number(match.start_time);
+  const preGameDuration = Math.max(0, Number(match.pre_game_duration || 0));
+  const matchStartTime = serverStartTime + preGameDuration;
   if (!Number.isFinite(committedAt) || !Number.isFinite(matchStartTime) || committedAt > matchStartTime) {
     fail('started_too_early', 'Ranked-сборка была получена после начала матча.');
   }
@@ -214,6 +217,8 @@ export function verifyMatch({ match, attempt, accountId }) {
     gameMode: Number(match.game_mode),
     lobbyType: Number(match.lobby_type),
     committedAt,
+    serverStartTime,
+    preGameDuration,
     matchStartTime
   };
 
@@ -224,7 +229,9 @@ export function verifyMatch({ match, attempt, accountId }) {
     return { ok: false, parsed: false, errorCodes: ['purchase_log_pending'], errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
   }
 
-  const items = Array.isArray(attempt.items) ? attempt.items : [];
+  const items = Array.isArray(attempt.items)
+    ? attempt.items.filter(item => Number(item.id) !== AEGIS_ITEM_ID)
+    : [];
   const purchaseLog = player.purchase_log;
   const purchaseIndices = items.map(item => firstPurchaseIndex(purchaseLog, item));
   const finalIds = [

@@ -1,6 +1,7 @@
 const AGHANIMS_SCEPTER_ID = 108;
 const AGHANIMS_SHARD_ID = 609;
 const SMOKE_OF_DECEIT_ID = 188;
+const DEFAULT_PRE_GAME_DURATION_SECONDS = 90;
 const STRATZ_LOBBY_TYPES = { UNRANKED: 0, TEAM_MATCH: 5, SOLO_QUEUE: 6, RANKED: 7, BATTLE_CUP: 9 };
 const STRATZ_GAME_MODES = {
   ALL_PICK: 1, CAPTAINS_MODE: 2, RANDOM_DRAFT: 3, SINGLE_DRAFT: 4, ALL_RANDOM: 5,
@@ -97,6 +98,7 @@ export function normalizeStratzMatch(payload) {
     radiant_win: match.didRadiantWin === true,
     duration: number(match.durationSeconds),
     start_time: number(match.startDateTime),
+    pre_game_duration: DEFAULT_PRE_GAME_DURATION_SECONDS,
     lobby_type: enumNumber(match.lobbyType, STRATZ_LOBBY_TYPES),
     game_mode: enumNumber(match.gameMode, STRATZ_GAME_MODES),
     radiant_score: number(match.radiantKills),

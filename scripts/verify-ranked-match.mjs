@@ -3,7 +3,7 @@ import { verifyMatch } from '../worker/src/verify.js';
 import { signVerificationPayload } from '../worker/src/verification-auth.js';
 
 const OPENDOTA_API = 'https://api.opendota.com/api';
-const USER_AGENT = 'dota-chaos-ranked-verifier/2.0.3 (+https://github.com/eljke/dota-chaos-build)';
+const USER_AGENT = 'dota-chaos-ranked-verifier/2.0.4 (+https://github.com/eljke/dota-chaos-build)';
 const POLL_DELAYS_MS = [30_000];
 const OPENDOTA_RETRY_DELAYS_MS = [0];
 const OPENDOTA_TIMEOUT_MS = 35_000;
@@ -406,6 +406,7 @@ function compactMatch(match) {
   return {
     match_id: match.match_id,
     start_time: match.start_time,
+    pre_game_duration: match.pre_game_duration,
     duration: match.duration,
     game_mode: match.game_mode,
     lobby_type: match.lobby_type,
