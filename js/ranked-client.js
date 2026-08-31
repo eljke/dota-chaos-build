@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=2.0.2';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=2.0.2';
+import { getLocale, modifierText, t } from './i18n.js?v=2.0.3';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=2.0.3';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
@@ -313,7 +313,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       const startingBuyMissed = job.status === 'verified' && job.buildStyle === 'pro' && job.result?.startingBuyCompleted === false
         ? t('ranked.startingBuyMissed') : '';
       const reason = queueReason(job);
-      const retryButton = ['rejected', 'error', 'stale'].includes(job.status) ? `<button class="text-button" type="button"
+      const retryButton = job.retryable ? `<button class="text-button" type="button"
         data-retry-attempt="${escapeHtml(job.attemptId)}" data-retry-match="${escapeHtml(job.matchId)}" ${job.canRetry ? '' : 'disabled'}>${escapeHtml(job.canRetry
           ? t('ranked.retryAction') : t('ranked.retryIn', { time: formatCountdown(job.retryAfter || 0) }))}</button>` : '';
       const deferredForm = job.status === 'awaiting_match_id' ? `

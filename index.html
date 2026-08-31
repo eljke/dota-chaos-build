@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=2.0.2">
+  <link rel="stylesheet" href="styles.css?v=2.0.3">
   <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -237,7 +237,7 @@
             <label class="ranked-order"><input id="rankedOrder" type="checkbox"><span><span data-i18n="ranked.order">Собрать предметы по порядку</span> <b data-i18n="ranked.orderBonus">+20% к очкам</b></span></label>
             <button class="primary-button" id="rankedStartButton" type="button" data-i18n="ranked.start">ПОЛУЧИТЬ СБОРКУ</button>
           </div>
-          <p class="ranked-fine-print" data-i18n="ranked.setupHint">Сборка закрепится сразу. Начните матч после короткого таймера — так нельзя подобрать удобный ролл во время драфта.</p>
+          <p class="ranked-fine-print" data-i18n="ranked.setupHint">Получите сборку до начала матча. После окончания драфта выбирать её уже поздно.</p>
         </section>
 
         <article class="ranked-attempt dota-panel" id="rankedAttempt" hidden>
@@ -271,7 +271,7 @@
 
           <section class="ranked-eligibility" id="rankedEligibility">
             <span class="ranked-timer-icon" aria-hidden="true"></span>
-            <div><small data-i18n="ranked.timer">КОГДА МОЖНО СТАРТОВАТЬ</small><strong id="rankedEligibilityTime">—</strong><p data-i18n="ranked.timerHint">Матч должен начаться после этого времени.</p></div>
+            <div><small data-i18n="ranked.timer">ПРОВЕРКА ВРЕМЕНИ</small><strong id="rankedEligibilityTime">—</strong><p data-i18n="ranked.timerHint">Сборка должна быть получена до фактического начала матча.</p></div>
           </section>
 
           <div class="ranked-actions">
@@ -388,6 +388,15 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>2.0.3</h3><time datetime="2026-08-31" data-i18n="release.2.0.3.date">31 августа 2026</time></header>
+<ul>
+<li data-i18n="release.2.0.3.a">Защитный таймер убран: достаточно получить сборку до фактического начала матча.</li>
+<li data-i18n="release.2.0.3.b">Повторная проверка доступна только после временных технических ошибок.</li>
+<li data-i18n="release.2.0.3.c">Герои теперь выпадают с одинаковой вероятностью, без повторов из последних игр.</li>
+<li data-i18n="release.2.0.3.d">Turbo использует весь доступный high-MMR пул, пока собственная выборка пополняется.</li>
+</ul>
+      </article>
       <article>
         <header><h3>2.0.2</h3><time datetime="2026-08-31" data-i18n="release.2.0.2.date">31 августа 2026</time></header>
         <ul>
@@ -565,6 +574,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=2.0.2"></script>
+  <script type="module" src="app.js?v=2.0.3"></script>
 </body>
 </html>
