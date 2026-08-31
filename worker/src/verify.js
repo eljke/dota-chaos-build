@@ -225,14 +225,11 @@ export function verifyMatch({ match, attempt, accountId }) {
   // Basic match data is enough to reject a wrong hero, loss or invalid start time.
   // Do not spend a replay-parse request on a match that can never pass verification.
   if (errors.length) return { ok: false, parsed: true, errorCodes, errors, player, evidence: basicEvidence };
-  if (!Array.isArray(player.purchase_log)) {
-    return { ok: false, parsed: false, errorCodes: ['purchase_log_pending'], errors: ['Данные матча ещё не содержат журнал покупок.'], player, evidence: basicEvidence };
-  }
-
   const items = Array.isArray(attempt.items)
     ? attempt.items.filter(item => Number(item.id) !== AEGIS_ITEM_ID)
     : [];
-  const purchaseLog = player.purchase_log;
+  const hasPurchaseLog = Array.isArray(player.purchase_log);
+  const purchaseLog = hasPurchaseLog ? player.purchase_log : [];
   const purchaseIndices = items.map(item => firstPurchaseIndex(purchaseLog, item));
   const finalIds = [
     player.item_0, player.item_1, player.item_2, player.item_3, player.item_4, player.item_5,
@@ -246,13 +243,13 @@ export function verifyMatch({ match, attempt, accountId }) {
     finalSlot: assignedSlots[index],
     finalItemId: assignedSlots[index] >= 0 ? finalIds[assignedSlots[index]] : null,
     upgraded: assignedSlots[index] >= 0 && finalIds[assignedSlots[index]] !== Number(item.id),
-    matched: purchaseIndices[index] >= 0 && assignedSlots[index] >= 0
+    matched: assignedSlots[index] >= 0 && (!hasPurchaseLog || purchaseIndices[index] >= 0)
   }));
   const completedItems = matchedItems.filter(item => item.matched).length;
 
   if (completedItems === 0) fail('no_build_items', 'Не подтверждён ни один предмет из выданной сборки.');
 
-  let orderCompleted = true;
+  let orderCompleted = !attempt.order_required || hasPurchaseLog;
   if (attempt.order_required) {
     let previousIndex = -1;
     for (const item of matchedItems) {
@@ -267,7 +264,7 @@ export function verifyMatch({ match, attempt, accountId }) {
 
   const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
   const startingItems = Array.isArray(attempt.starting_items) ? attempt.starting_items : [];
-  const startingBuyCompleted = completedStartingBuy(startingItems, purchaseLog);
+  const startingBuyCompleted = hasPurchaseLog && completedStartingBuy(startingItems, purchaseLog);
 
   const totalItems = items.length || 6;
   return {
@@ -284,6 +281,7 @@ export function verifyMatch({ match, attempt, accountId }) {
     modifierCompleted: modifierProof.ok,
     evidence: {
       ...basicEvidence,
+      inventoryOnly: !hasPurchaseLog,
       completedItems,
       totalItems,
       completionMultiplier: completionMultiplier(completedItems, totalItems),

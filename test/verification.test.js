@@ -63,10 +63,16 @@ test('complete pregame buy earns its bonus', () => {
   assert.equal(calculateScore({ rerolls: 0, orderRequired: false, startingBuyCompleted: true }), 1050);
 });
 
-test('unparsed match asks for replay parsing', () => {
+test('unparsed match verifies final inventory without order bonus', () => {
   const unparsed = structuredClone(match);
   delete unparsed.players[0].purchase_log;
-  assert.equal(verifyMatch({ match: unparsed, attempt, accountId: 42 }).parsed, false);
+  const result = verifyMatch({ match: unparsed, attempt, accountId: 42 });
+  assert.equal(result.parsed, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.completedItems, 2);
+  assert.equal(result.orderCompleted, false);
+  assert.equal(result.startingBuyCompleted, false);
+  assert.equal(result.evidence.inventoryOnly, true);
 });
 
 test('unparsed wrong match is rejected without requesting replay data', () => {
