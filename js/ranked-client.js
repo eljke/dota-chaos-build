@@ -1,5 +1,5 @@
-import { getLocale, modifierText, t } from './i18n.js?v=2.0.1';
-import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=2.0.1';
+import { getLocale, modifierText, t } from './i18n.js?v=2.0.2';
+import { API_BASE, TOKEN_KEY, rankedRequest } from './ranked-api.js?v=2.0.2';
 
 const VIEW_KEY = 'dcb-active-view';
 const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
@@ -295,12 +295,27 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     return t(`ranked.queue${key[0].toUpperCase()}${key.slice(1)}`);
   }
 
+  function queueReason(job) {
+    if (job.status === 'rejected') return verificationMessage(job);
+    if (['error', 'stale'].includes(job.status)) {
+      return getLocale() === 'ru' && job.message ? job.message : t('ranked.queueError');
+    }
+    return '';
+  }
+
   function renderVerificationQueue() {
     ui.queue.hidden = !user;
     if (!user) return;
     ui.queueList.innerHTML = verificationQueue.length ? verificationQueue.map(job => {
       const modifierMissed = job.status === 'verified' && job.result?.modifierId && job.result?.modifierCompleted === false
         ? t('ranked.modifierMissed', { modifier: t(`modifier.${job.result.modifierId}.name`) }) : '';
+      const orderMissed = job.status === 'verified' && job.result?.orderCompleted === false ? t('ranked.orderMissed') : '';
+      const startingBuyMissed = job.status === 'verified' && job.buildStyle === 'pro' && job.result?.startingBuyCompleted === false
+        ? t('ranked.startingBuyMissed') : '';
+      const reason = queueReason(job);
+      const retryButton = ['rejected', 'error', 'stale'].includes(job.status) ? `<button class="text-button" type="button"
+        data-retry-attempt="${escapeHtml(job.attemptId)}" data-retry-match="${escapeHtml(job.matchId)}" ${job.canRetry ? '' : 'disabled'}>${escapeHtml(job.canRetry
+          ? t('ranked.retryAction') : t('ranked.retryIn', { time: formatCountdown(job.retryAfter || 0) }))}</button>` : '';
       const deferredForm = job.status === 'awaiting_match_id' ? `
         <div class="ranked-queue-submit"><input inputmode="numeric" autocomplete="off" data-deferred-match="${escapeHtml(job.attemptId)}"
           placeholder="${escapeHtml(t('ranked.matchPlaceholder'))}"><button class="secondary-button" type="button"
@@ -308,8 +323,12 @@ export async function initRanked({ onMessage = () => {} } = {}) {
       return `
       <li data-status="${escapeHtml(job.status)}">
         <strong>${escapeHtml(t('ranked.queueMatch', { matchId: job.matchId }))}${job.heroName ? ` · ${escapeHtml(job.heroName)}` : ''}</strong>
-        <span>${escapeHtml(queueStatus(job))}</span>
+        <span${reason ? ` title="${escapeHtml(reason)}"` : ''}>${escapeHtml(queueStatus(job))}</span>
+        ${reason ? `<small class="ranked-queue-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>` : ''}
         ${modifierMissed ? `<small>${escapeHtml(modifierMissed)}</small>` : ''}
+        ${orderMissed ? `<small>${escapeHtml(orderMissed)}</small>` : ''}
+        ${startingBuyMissed ? `<small>${escapeHtml(startingBuyMissed)}</small>` : ''}
+        ${retryButton ? `<div class="ranked-queue-actions">${retryButton}</div>` : ''}
         ${deferredForm}
       </li>`;
     }).join('') : `<li class="ranked-empty">${t('ranked.queueEmpty')}</li>`;
@@ -317,7 +336,7 @@ export async function initRanked({ onMessage = () => {} } = {}) {
 
   function scheduleQueuePolling() {
     if (queuePollTimer) clearTimeout(queuePollTimer);
-    const pending = verificationQueue.some(job => ['queued', 'running', 'retry'].includes(job.status));
+    const pending = verificationQueue.some(job => ['queued', 'running', 'retry'].includes(job.status) || Number(job.retryAfter || 0) > 0);
     queuePollTimer = user ? setTimeout(loadVerificationQueue, pending ? 5000 : 60000) : null;
   }
 
@@ -459,6 +478,17 @@ export async function initRanked({ onMessage = () => {} } = {}) {
     await loadVerificationQueue();
   }, t('ranked.deferring')));
   ui.queueList.addEventListener('click', event => {
+    const retryButton = event.target.closest('[data-retry-attempt]');
+    if (retryButton) {
+      action(async () => {
+        await request(`/attempts/${retryButton.dataset.retryAttempt}/submit`, {
+          method: 'POST', body: JSON.stringify({ matchId: retryButton.dataset.retryMatch })
+        });
+        setStatus(t('ranked.queuedFree'), 'ok');
+        await loadVerificationQueue();
+      }, t('ranked.retrying'));
+      return;
+    }
     const button = event.target.closest('[data-submit-deferred]');
     if (!button) return;
     const attemptId = button.dataset.submitDeferred;

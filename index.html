@@ -20,7 +20,7 @@
   <title>Dota 2 Random — случайный герой, предметы и модификатор</title>
   <link rel="icon" href="assets/rune.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=2.0.1">
+  <link rel="stylesheet" href="styles.css?v=2.0.2">
   <script type="application/ld+json" id="structuredData">{
     "@context":"https://schema.org",
     "@type":"WebApplication",
@@ -257,7 +257,7 @@
             <div class="ranked-section-title"><span>02</span><div><small data-i18n="ranked.buildKicker">ВАША СБОРКА</small><h2 id="rankedBuildTitle" data-i18n="ranked.buildTitle">Шесть предметов на эту игру</h2></div></div>
             <div class="ranked-items" id="rankedItems" aria-label="Предметы ranked-сборки" data-i18n-aria-label="ranked.itemsLabel"></div>
             <div class="ranked-pro-details" id="rankedProDetails" hidden>
-              <div><small data-i18n="ranked.startingBuy">СТАРТОВЫЙ ЗАКУП</small><div class="ranked-starting-items" id="rankedStartingItems"></div></div>
+              <div><small data-i18n="ranked.startingBuy">СТАРТОВЫЙ ЗАКУП</small><span class="ranked-starting-bonus" data-i18n="ranked.startingBonus">Весь закуп: +5% очков</span><div class="ranked-starting-items" id="rankedStartingItems"></div></div>
               <div class="ranked-source"><small data-i18n="ranked.source">ИСТОЧНИК СБОРКИ</small><strong id="rankedSourcePlayer">—</strong><a id="rankedSourceMatch" target="_blank" rel="noreferrer">STRATZ</a><span id="rankedSourceSample"></span></div>
             </div>
             <div class="ranked-upgrades">
@@ -388,6 +388,15 @@
       <button id="closeReleaseNotesButton" type="button" aria-label="Закрыть" data-i18n-aria-label="dialogs.close">×</button>
     </div>
     <div class="release-notes">
+      <article>
+        <header><h3>2.0.2</h3><time datetime="2026-08-31" data-i18n="release.2.0.2.date">31 августа 2026</time></header>
+        <ul>
+          <li data-i18n="release.2.0.2.a">В очереди видна причина отказа, а матч можно отправить на повторную проверку.</li>
+          <li data-i18n="release.2.0.2.b">Порядок предметов теперь даёт бонус, но не отменяет победу; Aegis исключён из сборок.</li>
+          <li data-i18n="release.2.0.2.c">Стартовый закуп показывается всегда и даёт +5% за полное выполнение.</li>
+          <li data-i18n="release.2.0.2.d">High-MMR выборка обновляется ежедневно.</li>
+        </ul>
+      </article>
       <article>
         <header><h3>2.0.1</h3><time datetime="2026-08-31" data-i18n="release.2.0.1.date">31 августа 2026</time></header>
         <ul>
@@ -556,6 +565,6 @@
   </template>
 
   <script src="analytics-config.js?v=1.2.0"></script>
-  <script type="module" src="app.js?v=2.0.1"></script>
+  <script type="module" src="app.js?v=2.0.2"></script>
 </body>
 </html>

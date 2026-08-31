@@ -87,6 +87,19 @@ function finalItemAssignment(items, finalIds) {
   return assignedSlot;
 }
 
+function completedStartingBuy(items, purchaseLog) {
+  if (!items.length) return false;
+  const available = purchaseLog
+    .filter(entry => Number(entry?.time) <= 0)
+    .map(entry => ({ entry, used: false }));
+  return items.every(item => {
+    const purchase = available.find(candidate => !candidate.used && entryMatchesItem(candidate.entry, item));
+    if (!purchase) return false;
+    purchase.used = true;
+    return true;
+  });
+}
+
 export function completionMultiplier(completedItems, totalItems = 6) {
   const total = Math.max(1, Number(totalItems) || 1);
   const completed = Math.max(0, Math.min(total, Number(completedItems) || 0));
@@ -98,14 +111,16 @@ export function calculateScore({
   rerolls,
   cancelPenalties = 0,
   orderRequired,
+  startingBuyCompleted = false,
   modifierMultiplier = 1,
   completedItems = 6,
   totalItems = 6
 }) {
   const orderMultiplier = orderRequired ? 1.2 : 1;
+  const startingBuyMultiplier = startingBuyCompleted ? 1.05 : 1;
   const penaltyDivisor = Number(rerolls) + Number(cancelPenalties) + 1;
   const buildMultiplier = completionMultiplier(completedItems, totalItems);
-  return Math.round(1000 * modifierMultiplier * orderMultiplier * buildMultiplier / penaltyDivisor);
+  return Math.round(1000 * modifierMultiplier * orderMultiplier * startingBuyMultiplier * buildMultiplier / penaltyDivisor);
 }
 
 export function canSubmitAttempt(attempt) {
@@ -226,12 +241,13 @@ export function verifyMatch({ match, attempt, accountId }) {
 
   if (completedItems === 0) fail('no_build_items', 'Не подтверждён ни один предмет из выданной сборки.');
 
+  let orderCompleted = true;
   if (attempt.order_required) {
     let previousIndex = -1;
     for (const item of matchedItems) {
       if (!item.matched) continue;
       if (item.purchaseIndex <= previousIndex) {
-        fail('wrong_item_order', 'Подтверждённые предметы завершены не в выданном порядке.');
+        orderCompleted = false;
         break;
       }
       previousIndex = item.purchaseIndex;
@@ -239,6 +255,8 @@ export function verifyMatch({ match, attempt, accountId }) {
   }
 
   const modifierProof = verifyModifier({ modifierId: attempt.modifier_id, match, player, attempt });
+  const startingItems = Array.isArray(attempt.starting_items) ? attempt.starting_items : [];
+  const startingBuyCompleted = completedStartingBuy(startingItems, purchaseLog);
 
   const totalItems = items.length || 6;
   return {
@@ -250,12 +268,16 @@ export function verifyMatch({ match, attempt, accountId }) {
     completedItems,
     totalItems,
     completionMultiplier: completionMultiplier(completedItems, totalItems),
+    orderCompleted,
+    startingBuyCompleted,
     modifierCompleted: modifierProof.ok,
     evidence: {
       ...basicEvidence,
       completedItems,
       totalItems,
       completionMultiplier: completionMultiplier(completedItems, totalItems),
+      orderCompleted,
+      startingBuyCompleted,
       matchedItems,
       missingItems: matchedItems.filter(item => !item.matched).map(item => ({ id: item.id, name: item.name })),
       finalItemIds: finalIds,
