@@ -39,6 +39,7 @@ test('normalizes STRATZ match into verification shape', () => {
   assert.equal(match.players[0].rune_pickups, 2);
   assert.equal(match.lobby_type, 7);
   assert.equal(match.game_mode, 23);
+  assert.equal(match.pre_game_duration, 90);
 });
 
 test('STRATZ item-id purchase log can verify a ranked build', () => {

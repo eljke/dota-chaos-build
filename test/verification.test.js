@@ -97,6 +97,11 @@ test('build must be assigned no later than match start', () => {
 
   const onTime = { ...attempt, committed_at: 1299, match_guard_seconds: 0 };
   assert.equal(verifyMatch({ match: { ...match, start_time: 1299 }, attempt: onTime, accountId: 42 }).ok, true);
+
+  const duringPregame = { ...attempt, committed_at: 1359, match_guard_seconds: 0 };
+  assert.equal(verifyMatch({
+    match: { ...match, start_time: 1299, pre_game_duration: 60 }, attempt: duringPregame, accountId: 42
+  }).ok, true);
 });
 
 test('only recoverable verification errors can be retried', () => {
@@ -133,6 +138,13 @@ test('partial build receives an exponential score reduction', () => {
   assert.ok(Math.abs(result.completionMultiplier - 0.216) < 1e-12);
   assert.equal(completionMultiplier(5, 6), 0.6);
   assert.equal(calculateScore({ rerolls: 0, orderRequired: false, completedItems: 3, totalItems: 6 }), 216);
+});
+
+test('legacy Aegis slots are ignored during verification', () => {
+  const legacyAttempt = { ...attempt, items: [...items, { id: 117, key: 'aegis', name: 'Aegis' }] };
+  const result = verifyMatch({ match, attempt: legacyAttempt, accountId: 42 });
+  assert.equal(result.ok, true);
+  assert.equal(result.totalItems, items.length);
 });
 
 test('an upgraded item counts for its original build component', () => {
