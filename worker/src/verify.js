@@ -127,6 +127,10 @@ export function canSubmitAttempt(attempt) {
   return attempt?.status === 'committed' || (attempt?.status === 'expired' && Number(attempt?.deferred_at) > 0);
 }
 
+export function canRetryVerificationJob(job) {
+  return job?.status === 'error' && job.message !== 'Этот матч или попытка уже подтверждены.';
+}
+
 export function verifyModifier({ modifierId, match, player, attempt }) {
   const modifier = modifierById(modifierId);
   if (!modifier) return { ok: !modifierId, code: modifierId ? 'unknown_modifier' : null, error: modifierId ? 'Неизвестный ranked-модификатор.' : null, evidence: null };
@@ -198,10 +202,10 @@ export function verifyMatch({ match, attempt, accountId }) {
   if (Number(player.win) !== 1) fail('not_a_win', 'Матч не завершён победой.');
   if (Number(player.leaver_status) !== 0) fail('abandon', 'Матч содержит abandon или ранний выход.');
 
-  const guardSeconds = Number(attempt.match_guard_seconds || 0);
-  const eligibleAfter = Number(attempt.committed_at) + guardSeconds;
-  if (!Number.isFinite(eligibleAfter) || Number(match.start_time) < eligibleAfter) {
-    fail('started_too_early', `Матч начался слишком рано: ranked-сборка должна быть выдана минимум за ${Math.ceil(guardSeconds / 60)} мин. до старта.`);
+  const committedAt = Number(attempt.committed_at);
+  const matchStartTime = Number(match.start_time);
+  if (!Number.isFinite(committedAt) || !Number.isFinite(matchStartTime) || committedAt > matchStartTime) {
+    fail('started_too_early', 'Ranked-сборка была получена после начала матча.');
   }
 
   const basicEvidence = {
@@ -209,8 +213,8 @@ export function verifyMatch({ match, attempt, accountId }) {
     duration: Number(match.duration),
     gameMode: Number(match.game_mode),
     lobbyType: Number(match.lobby_type),
-    committedAt: Number(attempt.committed_at),
-    eligibleAfter
+    committedAt,
+    matchStartTime
   };
 
   // Basic match data is enough to reject a wrong hero, loss or invalid start time.

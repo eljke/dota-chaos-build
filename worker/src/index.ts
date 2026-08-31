@@ -1,7 +1,7 @@
 import { generateBuild, seededRandom } from '../../js/generator.js';
 import { BOOT_KEYS, isItemCompatible } from '../../js/item-rules.js';
 import { eligibleModifiers, modifierById } from '../../js/modifiers.js';
-import { calculateScore, canSubmitAttempt, verifyMatch } from './verify.js';
+import { calculateScore, canRetryVerificationJob, canSubmitAttempt, verifyMatch } from './verify.js';
 import { verifyVerificationSignature } from './verification-auth.js';
 import { normalizeStratzMatch } from './providers.js';
 
@@ -44,14 +44,16 @@ const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ATTEMPT_SECONDS = 24 * 60 * 60;
 const CANCEL_COOLDOWN_SECONDS = 60;
 const CANCEL_PENALTY_ROLLS = 1;
-const MATCH_GUARD_SECONDS = { normal: 60, turbo: 60 } as const;
+const MATCH_GUARD_SECONDS = { normal: 0, turbo: 0 } as const;
 const VERIFICATION_JOB_SECONDS = 2 * 60 * 60;
 const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '2.0.2';
+const RULES_VERSION = '2.0.3';
 const PRO_SAMPLE_MAX_AGE = 30 * 24 * 60 * 60;
+const RECENT_HERO_LIMIT = 5;
+const PRO_HERO_SAMPLE_TARGET = 3;
 const NON_BUILD_ITEM_IDS = new Set([108, 117, 609]);
 const STARTING_BUY_IDS: Record<string, number[]> = {
   POSITION_1: [44, 16, 16, 11, 20, 237],
@@ -245,13 +247,14 @@ async function getPool(env: Env, ctx: ExecutionContext): Promise<RankedPool> {
   return value;
 }
 
-function createRoll(pool: RankedPool, mode: 'normal' | 'turbo', orderRequired: boolean) {
+function createRoll(pool: RankedPool, mode: 'normal' | 'turbo', orderRequired: boolean, excludedHeroIds: number[] = []) {
   const seed = crypto.randomUUID();
   const itemsByKey = Object.fromEntries(pool.items.map(item => [item.key, item]));
+  const availableHeroes = pool.heroes.filter(hero => !excludedHeroIds.includes(hero.id));
   const build = generateBuild({
     seed,
     forceBootSlot: true,
-    heroes: pool.heroes,
+    heroes: availableHeroes.length ? availableHeroes : pool.heroes,
     itemPool: pool.items.filter(item => item.key !== 'rapier' && !NON_BUILD_ITEM_IDS.has(item.id)),
     itemsByKey,
     bootKeys: BOOT_KEYS,
@@ -289,18 +292,43 @@ function fallbackStartingItems(position: string, catalog: Map<number, RankedItem
     .map(id => catalog.get(id)).filter((item): item is RankedItem => Boolean(item));
 }
 
-async function createProRoll(pool: RankedPool, mode: 'normal' | 'turbo', env: Env) {
+async function recentHeroIds(steamId: string, env: Env): Promise<number[]> {
+  const { results } = await env.DB.prepare(`SELECT hero_id FROM attempts WHERE steam_id = ?
+    ORDER BY created_at DESC LIMIT ?`).bind(steamId, RECENT_HERO_LIMIT).all<{ hero_id: number }>();
+  return results.map(row => Number(row.hero_id));
+}
+
+async function createProRoll(
+  pool: RankedPool, mode: 'normal' | 'turbo', env: Env, excludedHeroIds: number[] = []
+) {
   const cutoff = nowSeconds() - PRO_SAMPLE_MAX_AGE;
-  const { results: samples } = await env.DB.prepare(`SELECT * FROM pro_build_samples
-    WHERE mode = ? AND observed_at >= ? ORDER BY RANDOM() LIMIT 25`)
-    .bind(mode, cutoff).all<ProBuildSampleRow>();
-  if (!samples.length) throw new HttpError(503, mode === 'turbo'
+  const sourceModes = mode === 'turbo' ? ['turbo', 'normal'] : ['normal'];
+  const modePlaceholders = sourceModes.map(() => '?').join(', ');
+  const excludedPlaceholders = excludedHeroIds.map(() => '?').join(', ');
+  const eligibleWhere = `mode IN (${modePlaceholders}) AND observed_at >= ?
+    AND json_array_length(core_item_ids) = 6
+    AND NOT EXISTS (SELECT 1 FROM json_each(core_item_ids) WHERE CAST(value AS INTEGER) IN (108, 117, 609))`;
+  const exclusion = excludedHeroIds.length ? ` AND hero_id NOT IN (${excludedPlaceholders})` : '';
+  let { results: heroes } = await env.DB.prepare(`SELECT hero_id FROM pro_build_samples
+    WHERE ${eligibleWhere}${exclusion} GROUP BY hero_id ORDER BY RANDOM() LIMIT 25`)
+    .bind(...sourceModes, cutoff, ...excludedHeroIds).all<{ hero_id: number }>();
+  if (!heroes.length && excludedHeroIds.length) {
+    ({ results: heroes } = await env.DB.prepare(`SELECT hero_id FROM pro_build_samples
+      WHERE ${eligibleWhere} GROUP BY hero_id ORDER BY RANDOM() LIMIT 25`)
+      .bind(...sourceModes, cutoff).all<{ hero_id: number }>());
+  }
+  const selectedHero = heroes.map(row => pool.heroes.find(hero => hero.id === Number(row.hero_id))).find(Boolean);
+  if (!selectedHero) throw new HttpError(503, mode === 'turbo'
     ? 'Свежая Turbo-выборка ещё собирается. Попробуйте немного позже.'
     : 'Свежая high-MMR выборка ещё собирается. Попробуйте немного позже.', 'pro_pool_warming_up');
+  const { results: samples } = await env.DB.prepare(`SELECT * FROM pro_build_samples
+    WHERE ${eligibleWhere} AND hero_id = ?
+    ORDER BY CASE WHEN mode = ? THEN 0 ELSE 1 END, RANDOM() LIMIT 25`)
+    .bind(...sourceModes, cutoff, selectedHero.id, mode).all<ProBuildSampleRow>();
   const catalog = await getItemCatalog(env);
   const selected = samples.map(sample => ({
     sample,
-    hero: pool.heroes.find(entry => entry.id === sample.hero_id),
+    hero: selectedHero,
     items: resolveItems(sample.core_item_ids, catalog)
       .filter(item => !NON_BUILD_ITEM_IDS.has(item.id) && item.cost > 0)
   })).find(candidate => candidate.hero && candidate.items.length === 6);
@@ -309,8 +337,8 @@ async function createProRoll(pool: RankedPool, mode: 'normal' | 'turbo', env: En
   const sourceStartingItems = resolveItems(sample.starting_item_ids, catalog).filter(item => item.id !== 117);
   const startingItems = sourceStartingItems.length ? sourceStartingItems : fallbackStartingItems(sample.position, catalog);
   const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM pro_build_samples
-    WHERE mode = ? AND hero_id = ? AND position = ? AND observed_at >= ?`)
-    .bind(mode, sample.hero_id, sample.position, cutoff).first<{ count: number }>();
+    WHERE mode IN (${modePlaceholders}) AND hero_id = ? AND position = ? AND observed_at >= ?`)
+    .bind(...sourceModes, sample.hero_id, sample.position, cutoff).first<{ count: number }>();
   const seed = crypto.randomUUID();
   const modifiers = eligibleModifiers({ hero, items });
   const modifier = modifiers[Math.floor(seededRandom(`modifier:${seed}`)() * modifiers.length)];
@@ -516,7 +544,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/2.0.2',
+      'User-Agent': 'dota-chaos-ranked-worker/2.0.3',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
@@ -569,7 +597,7 @@ function parseJobResult(job: VerificationJobRow): JsonObject | null {
 }
 
 function verificationJobPayload(job: VerificationJobRow, attempt?: AttemptRow | null) {
-  const manualRetry = ['rejected', 'error', 'stale'].includes(job.status);
+  const manualRetry = canRetryVerificationJob(job);
   const retryAfter = job.status === 'retry'
     ? Math.max(1, Number(attempt?.verification_retry_at || nowSeconds() + 15) - nowSeconds())
     : ['queued', 'running'].includes(job.status) ? 5
@@ -581,6 +609,7 @@ function verificationJobPayload(job: VerificationJobRow, attempt?: AttemptRow | 
     status: job.status,
     message: job.message,
     retryAfter,
+    retryable: manualRetry,
     canRetry: manualRetry && retryAfter === 0,
     result: parseJobResult(job),
     updatedAt: job.updated_at
@@ -790,6 +819,21 @@ async function processProBuildRefresh(env: Env, discover: boolean): Promise<void
   await env.DB.prepare('DELETE FROM pro_build_samples WHERE observed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
   await env.DB.prepare('DELETE FROM pro_refresh_seen WHERE processed_at < ?').bind(now - PRO_SAMPLE_MAX_AGE).run();
   console.log(JSON.stringify({ message: 'pro-build refresh completed', processed: candidates.length, samples, discovered }));
+}
+
+async function proPoolNeedsCoverage(env: Env): Promise<boolean> {
+  const response = await fetch(new URL('data/ranked-pool.json', env.SITE_URL));
+  if (!response.ok) return false;
+  const pool: unknown = await response.json();
+  if (!isRankedPool(pool)) return false;
+  const cutoff = nowSeconds() - PRO_SAMPLE_MAX_AGE;
+  const coverage = await env.DB.prepare(`SELECT COUNT(*) AS heroes FROM (
+    SELECT hero_id FROM pro_build_samples WHERE observed_at >= ?
+      AND json_array_length(core_item_ids) = 6
+      AND NOT EXISTS (SELECT 1 FROM json_each(core_item_ids) WHERE CAST(value AS INTEGER) IN (108, 117, 609))
+    GROUP BY hero_id HAVING COUNT(*) >= ?
+  )`).bind(cutoff, PRO_HERO_SAMPLE_TARGET).first<{ heroes: number }>();
+  return Number(coverage?.heroes || 0) < pool.heroes.length;
 }
 
 async function ensureNoActiveVerification(attemptId: string, env: Env): Promise<void> {
@@ -1076,7 +1120,10 @@ async function handleCreateAttempt(request: Request, env: Env, ctx: ExecutionCon
       AND NOT EXISTS (SELECT 1 FROM verification_jobs WHERE verification_jobs.attempt_id = attempts.id
         AND verification_jobs.status IN ('queued', 'running', 'retry'))`).bind(now, user.steam_id).run();
   const pool = await getPool(env, ctx);
-  const roll = buildStyle === 'pro' ? await createProRoll(pool, mode, env) : createRoll(pool, mode, orderRequired);
+  const excludedHeroIds = await recentHeroIds(user.steam_id, env);
+  const roll = buildStyle === 'pro'
+    ? await createProRoll(pool, mode, env, excludedHeroIds)
+    : createRoll(pool, mode, orderRequired, excludedHeroIds);
   const id = crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO attempts
     (id, steam_id, mode, order_required, status, roll_count, cancel_penalties, seed, hero_id, hero_key, hero_name, items_json,
@@ -1098,9 +1145,10 @@ async function handleReroll(id: string, request: Request, env: Env, ctx: Executi
   if (current.status !== 'committed') throw new HttpError(409, 'Эту попытку уже нельзя перебросить.', 'attempt_locked');
   await ensureNoActiveVerification(current.id, env);
   const pool = await getPool(env, ctx);
+  const excludedHeroIds = await recentHeroIds(user.steam_id, env);
   const roll = current.build_style === 'pro'
-    ? await createProRoll(pool, current.mode, env)
-    : createRoll(pool, current.mode, current.order_required === 1);
+    ? await createProRoll(pool, current.mode, env, excludedHeroIds)
+    : createRoll(pool, current.mode, current.order_required === 1, excludedHeroIds);
   const now = nowSeconds();
   const result = await env.DB.prepare(`UPDATE attempts SET roll_count = roll_count + 1, seed = ?, hero_id = ?, hero_key = ?,
     hero_name = ?, items_json = ?, modifier_id = ?, rules_version = ?, data_version = ?, committed_at = ?, verification_retry_at = 0,
@@ -1164,7 +1212,7 @@ async function handleSubmit(id: string, request: Request, env: Env): Promise<Res
   const user = await requireUser(request, env);
   const attempt = await getAttempt(id, user.steam_id, env);
   const latest = await latestVerificationJob(attempt.id, env);
-  const canRetry = attempt.status === 'expired' && latest && ['rejected', 'error', 'stale'].includes(latest.status);
+  const canRetry = attempt.status === 'expired' && latest && canRetryVerificationJob(latest);
   if ((!canSubmitAttempt(attempt) && !canRetry) || !attempt.committed_at) {
     throw new HttpError(409, 'Ranked-попытка не активна.', 'attempt_not_committed');
   }
@@ -1367,7 +1415,9 @@ export default {
     await processVerificationQueue(env);
     if (controller.cron === '*/10 * * * *' || controller.cron === '17 3 * * *') {
       try {
-        await processProBuildRefresh(env, controller.cron === '17 3 * * *');
+        const dailyRefresh = controller.cron === '17 3 * * *';
+        const hourlyCatchUp = new Date(controller.scheduledTime).getUTCMinutes() === 0 && await proPoolNeedsCoverage(env);
+        await processProBuildRefresh(env, dailyRefresh || hourlyCatchUp);
       } catch (error) {
         console.error(JSON.stringify({ message: 'pro-build refresh failed', error: error instanceof Error ? error.message : String(error) }));
       }

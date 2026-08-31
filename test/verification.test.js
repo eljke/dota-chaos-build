@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateScore, canSubmitAttempt, completionMultiplier, verifyMatch } from '../worker/src/verify.js';
+import { calculateScore, canRetryVerificationJob, canSubmitAttempt, completionMultiplier, verifyMatch } from '../worker/src/verify.js';
 
 const items = [
   { id: 50, key: 'phase_boots', sourceKey: 'phase_boots', name: 'Phase Boots' },
@@ -88,12 +88,22 @@ test('failed modifier keeps the win eligible without its bonus', () => {
   assert.equal(calculateScore({ rerolls: 0, orderRequired: false, modifierMultiplier: 1 }), 1000);
 });
 
-test('match must start after the anti-abuse guard window', () => {
-  const guarded = { ...attempt, committed_at: 1000, match_guard_seconds: 300 };
-  const result = verifyMatch({ match: { ...match, start_time: 1299 }, attempt: guarded, accountId: 42 });
+test('build must be assigned no later than match start', () => {
+  const late = { ...attempt, committed_at: 1300, match_guard_seconds: 0 };
+  const result = verifyMatch({ match: { ...match, start_time: 1299 }, attempt: late, accountId: 42 });
   assert.equal(result.ok, false);
   assert.ok(result.errorCodes.includes('started_too_early'));
-  assert.ok(result.errors.some(error => error.includes('слишком рано')));
+  assert.ok(result.errors.some(error => error.includes('после начала')));
+
+  const onTime = { ...attempt, committed_at: 1299, match_guard_seconds: 0 };
+  assert.equal(verifyMatch({ match: { ...match, start_time: 1299 }, attempt: onTime, accountId: 42 }).ok, true);
+});
+
+test('only recoverable verification errors can be retried', () => {
+  assert.equal(canRetryVerificationJob({ status: 'error', message: 'Provider timeout.' }), true);
+  assert.equal(canRetryVerificationJob({ status: 'rejected', message: 'Wrong hero.' }), false);
+  assert.equal(canRetryVerificationJob({ status: 'stale', message: 'Build changed.' }), false);
+  assert.equal(canRetryVerificationJob({ status: 'error', message: 'Этот матч или попытка уже подтверждены.' }), false);
 });
 
 
