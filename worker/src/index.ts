@@ -50,7 +50,7 @@ const VERIFICATION_CALLBACK_MAX_BYTES = 256 * 1024;
 const VERIFICATION_CALLBACK_MAX_AGE_SECONDS = 10 * 60;
 const VERIFICATION_REQUEST_COOLDOWN_SECONDS = 15;
 const VERIFICATION_RETRY_SECONDS = 60;
-const RULES_VERSION = '2.0.4';
+const RULES_VERSION = '2.0.5';
 const PRO_SAMPLE_MAX_AGE = 30 * 24 * 60 * 60;
 const RECENT_HERO_LIMIT = 5;
 const PRO_HERO_SAMPLE_TARGET = 3;
@@ -544,7 +544,7 @@ async function dispatchVerificationJob(job: VerificationJobRow, attempt: Attempt
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
-      'User-Agent': 'dota-chaos-ranked-worker/2.0.4',
+      'User-Agent': 'dota-chaos-ranked-worker/2.0.5',
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: JSON.stringify({
